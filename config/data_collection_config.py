@@ -2,13 +2,19 @@
 Configuration parameters for data collection.
 """
 
-from typing import Dict, List
+SEASONS: list[int] = [2022, 2023, 2024, 2025]
 
-# Seasons to collect data for
-SEASONS: List[int] = [2024]
+SEASON_DATE_RANGES: dict[int, tuple[str, str]] = {
+    2022: ("04-07", "10-05"),  # Delayed start (lockout)
+    2023: ("03-30", "10-01"),
+    2024: ("03-20", "10-01"),  # Seoul series started early
+    2025: ("03-27", "09-28"),
+}
 
-# Ballpark coordinates for weather data
-BALLPARKS: Dict[str, Dict[str, float]] = {
+DEFAULT_SEASON_START: str = "03-20"
+DEFAULT_SEASON_END: str = "10-05"
+
+BALLPARKS: dict[str, dict[str, float]] = {
     "Yankee Stadium": {"lat": 40.8296, "lon": -73.9262},
     "Fenway Park": {"lat": 42.3467, "lon": -71.0972},
     "Rogers Centre": {"lat": 43.6414, "lon": -79.3894},
@@ -41,22 +47,9 @@ BALLPARKS: Dict[str, Dict[str, float]] = {
     "Oracle Park": {"lat": 37.7786, "lon": -122.3893}
 }
 
-# API rate limiting parameters
-RATE_LIMIT_DELAY: float = 0.3  # seconds between API calls
-WEATHER_RATE_LIMIT_DELAY: float = 1.0  # seconds between weather API calls
+RATE_LIMIT_DELAY: float = 0.3
+WEATHER_RATE_LIMIT_DELAY: float = 1.0
 
-# Date ranges for data collection
-SEASON_START: str = "03-28"  # 2024 Opening Day
-SEASON_END: str = "03-28"    # Starting with just Opening Day for initial test
-
-# File paths for data storage
 DATA_DIR: str = "data"
 RAW_DATA_DIR: str = f"{DATA_DIR}/raw"
 PROCESSED_DATA_DIR: str = f"{DATA_DIR}/processed"
-
-# Raw data files
-STATCAST_FILE: str = f"{RAW_DATA_DIR}/statcast_data.csv"
-BATTER_FILE: str = f"{RAW_DATA_DIR}/batter_data.csv"
-PITCHER_FILE: str = f"{RAW_DATA_DIR}/pitcher_data.csv"
-PARK_FACTORS_FILE: str = f"{RAW_DATA_DIR}/park_factors.csv"
-WEATHER_FILE: str = f"{RAW_DATA_DIR}/weather_data.csv" 
