@@ -4,6 +4,7 @@ import pytest
 import lightgbm as lgb
 
 from src.models.train_model import (
+    LEAKY_COLUMNS,
     METADATA_COLUMNS,
     TARGET_COLUMN,
     compute_scale_pos_weight,
@@ -25,7 +26,7 @@ class TestTimeBasedSplit:
         return pd.DataFrame({
             "game_date": dates,
             "batter": range(len(dates)),
-            "hit_hr": np.random.default_rng(42).integers(0, 2, len(dates)),
+            "is_hr": np.random.default_rng(42).integers(0, 2, len(dates)),
         })
 
     def test_train_dates_before_split_and_test_dates_after(self, date_range_df):
@@ -64,7 +65,8 @@ class TestPrepareFeatures:
             "pitcher": [100, 200],
             "home_team": ["NYY", "BOS"],
             "away_team": ["BOS", "NYY"],
-            "hit_hr": [0, 1],
+            "is_hr": [0, 1],
+            "launch_speed": [100.0, 95.0],
             "feature_a": [1.5, 2.5],
             "feature_b": [3.0, 4.0],
             "stand": ["R", "L"],
@@ -75,6 +77,7 @@ class TestPrepareFeatures:
         for col in METADATA_COLUMNS + [TARGET_COLUMN]:
             assert col not in X.columns
 
+        assert "launch_speed" not in X.columns
         assert list(y) == [0, 1]
 
     def test_categorical_columns_converted_to_category_dtype(self):
@@ -82,7 +85,7 @@ class TestPrepareFeatures:
             "batter": [1], "game_pk": [10],
             "game_date": pd.to_datetime(["2023-06-01"]),
             "pitcher": [100], "home_team": ["NYY"], "away_team": ["BOS"],
-            "hit_hr": [0],
+            "is_hr": [0],
             "stand": ["R"], "p_throws": ["L"], "platoon": ["R_vs_L"],
             "feature_a": [1.0],
         })

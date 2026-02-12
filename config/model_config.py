@@ -12,7 +12,7 @@ LIGHTGBM_PARAMS: dict = {
     "feature_fraction": 0.8,
     "bagging_fraction": 0.8,
     "bagging_freq": 5,
-    "min_child_samples": 50,
+    "min_child_samples": 100,
     "verbose": -1,
     "n_jobs": -1,
     "seed": 42,
@@ -23,7 +23,7 @@ EARLY_STOPPING_ROUNDS: int = 50
 
 TOP_N_FEATURES: int = 20
 
-CATEGORICAL_FEATURES: list[str] = ["stand", "p_throws", "platoon"]
+CATEGORICAL_FEATURES: list[str] = ["stand", "p_throws", "platoon", "inning"]
 
 MODELS_DIR = Path("data/models")
 EVALUATION_DIR = MODELS_DIR / "evaluation"

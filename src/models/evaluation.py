@@ -5,6 +5,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 from sklearn.metrics import (
     average_precision_score,
     f1_score,
@@ -126,12 +127,39 @@ def plot_feature_importance(
     plt.close(fig)
 
 
+def evaluate_game_level_composition(
+    test_df: pd.DataFrame,
+    pa_pred_proba: np.ndarray,
+) -> dict:
+    df = test_df[["batter", "game_pk", "game_date", "is_hr"]].copy()
+    df["pred_proba"] = pa_pred_proba
+
+    game_df = df.groupby(["batter", "game_pk", "game_date"]).agg(
+        game_pred_proba=("pred_proba", lambda x: 1 - np.prod(1 - x)),
+        actual_hr=("is_hr", "max"),
+    ).reset_index()
+
+    metrics = evaluate_model(
+        y_true=game_df["actual_hr"].values,
+        y_pred_proba=game_df["game_pred_proba"].values,
+    )
+
+    logger.info(
+        "Game-level composition — PR-AUC: %.4f | ROC-AUC: %.4f",
+        metrics["pr_auc"],
+        metrics["roc_auc"],
+    )
+
+    return metrics
+
+
 def save_evaluation_report(
     metrics: dict,
     feature_names: list[str],
     importances: np.ndarray,
     y_true: np.ndarray,
     y_pred_proba: np.ndarray,
+    game_metrics: dict | None = None,
     output_dir: Path | None = None,
 ) -> None:
     output_dir = Path(output_dir) if output_dir is not None else EVALUATION_DIR
@@ -145,7 +173,7 @@ def save_evaluation_report(
     lines.append("MODEL EVALUATION REPORT")
     lines.append("=" * 60)
     lines.append("")
-    lines.append("Performance Metrics")
+    lines.append("PA-Level Performance Metrics")
     lines.append("-" * 40)
     lines.append(f"  PR-AUC:        {metrics.get('pr_auc', 0):.4f}")
     lines.append(f"  ROC-AUC:       {metrics.get('roc_auc', 0):.4f}")
@@ -155,6 +183,19 @@ def save_evaluation_report(
     lines.append(f"  Positive rate: {metrics.get('n_positive', 0)}/{metrics.get('n_total', 0)} "
                  f"({metrics.get('positive_rate', 0) * 100:.2f}%)")
     lines.append("")
+
+    if game_metrics is not None:
+        lines.append("Game-Level Composition Metrics")
+        lines.append("-" * 40)
+        lines.append(f"  PR-AUC:        {game_metrics.get('pr_auc', 0):.4f}")
+        lines.append(f"  ROC-AUC:       {game_metrics.get('roc_auc', 0):.4f}")
+        lines.append(f"  Precision:     {game_metrics.get('precision', 0):.4f}")
+        lines.append(f"  Recall:        {game_metrics.get('recall', 0):.4f}")
+        lines.append(f"  F1 Score:      {game_metrics.get('f1', 0):.4f}")
+        lines.append(f"  Positive rate: {game_metrics.get('n_positive', 0)}/{game_metrics.get('n_total', 0)} "
+                     f"({game_metrics.get('positive_rate', 0) * 100:.2f}%)")
+        lines.append("")
+
     lines.append(f"Top {TOP_N_FEATURES} Features by Importance")
     lines.append("-" * 40)
 

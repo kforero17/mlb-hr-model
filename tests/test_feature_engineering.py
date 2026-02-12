@@ -7,8 +7,10 @@ from src.features.feature_engineering import (
     add_game_context_features,
     add_platoon_features,
     aggregate_to_batter_game,
+    build_pa_rows,
     compute_batter_rolling_stats,
     compute_pitcher_rolling_stats,
+    merge_rolling_stats_onto_pas,
 )
 
 
@@ -20,7 +22,7 @@ from src.features.feature_engineering import (
 def pitch_level_data():
     rows = []
 
-    # Batter 1, Game 1 — 3 PAs across 6 pitches
+    # Batter 1, Game 1 — 4 PAs across 6 pitches
     base = dict(
         batter=100, pitcher=900, game_pk=1, game_date="2023-06-01",
         home_team="NYY", away_team="BOS", stand="R", p_throws="L",
@@ -28,34 +30,43 @@ def pitch_level_data():
     )
     rows.append({**base, "at_bat_number": 1, "events": np.nan,
                  "launch_speed": np.nan, "launch_angle": np.nan,
-                 "description": "ball"})
+                 "description": "ball",
+                 "inning": 1, "outs_when_up": 0, "home_score": 0, "away_score": 0})
     rows.append({**base, "at_bat_number": 1, "events": "home_run",
                  "launch_speed": 105.0, "launch_angle": 28.0,
-                 "description": "hit_into_play"})
+                 "description": "hit_into_play",
+                 "inning": 1, "outs_when_up": 0, "home_score": 0, "away_score": 0})
     rows.append({**base, "at_bat_number": 2, "events": np.nan,
                  "launch_speed": np.nan, "launch_angle": np.nan,
-                 "description": "called_strike"})
+                 "description": "called_strike",
+                 "inning": 3, "outs_when_up": 1, "home_score": 1, "away_score": 0})
     rows.append({**base, "at_bat_number": 2, "events": "strikeout",
                  "launch_speed": np.nan, "launch_angle": np.nan,
-                 "description": "swinging_strike"})
+                 "description": "swinging_strike",
+                 "inning": 3, "outs_when_up": 1, "home_score": 1, "away_score": 0})
     rows.append({**base, "at_bat_number": 3, "events": "single",
                  "launch_speed": 92.0, "launch_angle": 12.0,
-                 "description": "hit_into_play"})
+                 "description": "hit_into_play",
+                 "inning": 5, "outs_when_up": 0, "home_score": 2, "away_score": 1})
     rows.append({**base, "at_bat_number": 4, "events": "walk",
                  "launch_speed": np.nan, "launch_angle": np.nan,
-                 "description": "ball"})
+                 "description": "ball",
+                 "inning": 7, "outs_when_up": 2, "home_score": 3, "away_score": 1})
 
     # Batter 1, Game 2 — 2 PAs
     base2 = {**base, "game_pk": 2, "game_date": "2023-06-02", "pitcher": 901}
     rows.append({**base2, "at_bat_number": 1, "events": "field_out",
                  "launch_speed": 88.0, "launch_angle": 45.0,
-                 "description": "hit_into_play"})
+                 "description": "hit_into_play",
+                 "inning": 2, "outs_when_up": 0, "home_score": 0, "away_score": 1})
     rows.append({**base2, "at_bat_number": 2, "events": np.nan,
                  "launch_speed": np.nan, "launch_angle": np.nan,
-                 "description": "ball"})
+                 "description": "ball",
+                 "inning": 4, "outs_when_up": 1, "home_score": 0, "away_score": 2})
     rows.append({**base2, "at_bat_number": 2, "events": "field_out",
                  "launch_speed": 75.0, "launch_angle": -5.0,
-                 "description": "hit_into_play"})
+                 "description": "hit_into_play",
+                 "inning": 4, "outs_when_up": 1, "home_score": 0, "away_score": 2})
 
     # Batter 2, Game 1 — 3 PAs
     base3 = dict(
@@ -65,28 +76,35 @@ def pitch_level_data():
     )
     rows.append({**base3, "at_bat_number": 1, "events": "home_run",
                  "launch_speed": 110.0, "launch_angle": 27.0,
-                 "description": "hit_into_play"})
+                 "description": "hit_into_play",
+                 "inning": 1, "outs_when_up": 2, "home_score": 0, "away_score": 0})
     rows.append({**base3, "at_bat_number": 2, "events": "walk",
                  "launch_speed": np.nan, "launch_angle": np.nan,
-                 "description": "ball"})
+                 "description": "ball",
+                 "inning": 3, "outs_when_up": 0, "home_score": 0, "away_score": 1})
     rows.append({**base3, "at_bat_number": 3, "events": "field_out",
                  "launch_speed": 95.0, "launch_angle": 10.0,
-                 "description": "hit_into_play"})
+                 "description": "hit_into_play",
+                 "inning": 6, "outs_when_up": 1, "home_score": 1, "away_score": 2})
 
     # Batter 2, Game 2 — 3 PAs
     base4 = {**base3, "game_pk": 2, "game_date": "2023-06-02", "pitcher": 901}
     rows.append({**base4, "at_bat_number": 1, "events": "single",
                  "launch_speed": 90.0, "launch_angle": 15.0,
-                 "description": "hit_into_play"})
+                 "description": "hit_into_play",
+                 "inning": 1, "outs_when_up": 1, "home_score": 0, "away_score": 0})
     rows.append({**base4, "at_bat_number": 2, "events": np.nan,
                  "launch_speed": np.nan, "launch_angle": np.nan,
-                 "description": "called_strike"})
+                 "description": "called_strike",
+                 "inning": 4, "outs_when_up": 0, "home_score": 2, "away_score": 1})
     rows.append({**base4, "at_bat_number": 2, "events": "strikeout",
                  "launch_speed": np.nan, "launch_angle": np.nan,
-                 "description": "swinging_strike"})
+                 "description": "swinging_strike",
+                 "inning": 4, "outs_when_up": 0, "home_score": 2, "away_score": 1})
     rows.append({**base4, "at_bat_number": 3, "events": "field_out",
                  "launch_speed": 80.0, "launch_angle": 35.0,
-                 "description": "hit_into_play"})
+                 "description": "hit_into_play",
+                 "inning": 7, "outs_when_up": 2, "home_score": 3, "away_score": 2})
 
     return pd.DataFrame(rows)
 
@@ -253,3 +271,70 @@ class TestAddGameContextFeatures:
 
         assert result["is_dh"].iloc[0] == 1  # NYY is AL
         assert result["is_dh"].iloc[1] == 0  # LAD is NL
+
+
+# ---------------------------------------------------------------------------
+# build_pa_rows
+# ---------------------------------------------------------------------------
+
+class TestBuildPaRows:
+
+    def test_returns_one_row_per_plate_appearance(self, pitch_level_data):
+        result = build_pa_rows(pitch_level_data)
+
+        assert len(result) == 12
+
+    def test_preserves_batter_and_pitcher_columns(self, pitch_level_data):
+        result = build_pa_rows(pitch_level_data)
+
+        assert "batter" in result.columns
+        assert "pitcher" in result.columns
+        assert result["batter"].notna().all()
+        assert result["pitcher"].notna().all()
+
+    def test_adds_pa_context_features(self, pitch_level_data):
+        result = build_pa_rows(pitch_level_data)
+
+        for col in ["is_home", "score_diff", "runners_on_base", "pa_number_in_game"]:
+            assert col in result.columns
+
+    def test_runners_on_base_defaults_to_zero_without_base_columns(self, pitch_level_data):
+        result = build_pa_rows(pitch_level_data)
+
+        assert (result["runners_on_base"] == 0).all()
+
+
+# ---------------------------------------------------------------------------
+# merge_rolling_stats_onto_pas
+# ---------------------------------------------------------------------------
+
+class TestMergeRollingStatsOntoPas:
+
+    def test_merges_batter_and_pitcher_stats_onto_pas(self):
+        pa_df = pd.DataFrame({
+            "batter": [100, 100, 100],
+            "pitcher": [900, 900, 901],
+            "game_pk": [1, 1, 1],
+            "game_date": pd.to_datetime(["2023-06-01"] * 3),
+            "is_hr": [0, 1, 0],
+        })
+
+        batter_rolling = pd.DataFrame({
+            "batter": [100],
+            "game_pk": [1],
+            "game_date": pd.to_datetime(["2023-06-01"]),
+            "batter_hr_rate_15g": [0.1],
+        })
+
+        pitcher_rolling = pd.DataFrame({
+            "pitcher": [900, 901],
+            "game_pk": [1, 1],
+            "game_date": pd.to_datetime(["2023-06-01", "2023-06-01"]),
+            "pitcher_hr_allowed_rate_15g": [0.05, 0.08],
+        })
+
+        result = merge_rolling_stats_onto_pas(pa_df, batter_rolling, pitcher_rolling)
+
+        assert len(result) == 3
+        assert (result["batter_hr_rate_15g"] == 0.1).all()
+        assert list(result["pitcher_hr_allowed_rate_15g"]) == [0.05, 0.05, 0.08]

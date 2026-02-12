@@ -294,3 +294,88 @@ def add_game_context_features(df: pd.DataFrame) -> pd.DataFrame:
 
     logger.info("Game context features added")
     return df
+
+
+def build_pa_rows(raw_df: pd.DataFrame) -> pd.DataFrame:
+    pa_df = _filter_plate_appearances(raw_df)
+    pa_df = _add_pa_context_features(pa_df)
+    return pa_df
+
+
+def _add_pa_context_features(pa_df: pd.DataFrame) -> pd.DataFrame:
+    pa_df = pa_df.copy()
+
+    pa_df["is_home"] = (pa_df["inning_topbot"] == "Bot").astype(int)
+
+    home_score = pa_df["home_score"].fillna(0) if "home_score" in pa_df.columns else 0
+    away_score = pa_df["away_score"].fillna(0) if "away_score" in pa_df.columns else 0
+    pa_df["score_diff"] = np.where(
+        pa_df["is_home"] == 1,
+        home_score - away_score,
+        away_score - home_score,
+    )
+
+    base_cols = ["on_1b", "on_2b", "on_3b"]
+    present = [c for c in base_cols if c in pa_df.columns]
+    if present:
+        pa_df["runners_on_base"] = pa_df[present].notna().sum(axis=1).astype(int)
+    else:
+        pa_df["runners_on_base"] = 0
+
+    pa_df = pa_df.sort_values("at_bat_number")
+    pa_df["pa_number_in_game"] = (
+        pa_df.groupby(["batter", "game_pk"]).cumcount() + 1
+    )
+
+    return pa_df
+
+
+def merge_rolling_stats_onto_pas(
+    pa_df: pd.DataFrame,
+    batter_rolling_df: pd.DataFrame,
+    pitcher_rolling_df: pd.DataFrame,
+) -> pd.DataFrame:
+    batter_stat_cols = [
+        c for c in batter_rolling_df.columns
+        if c.startswith("batter_") or c == "games_since_last_hr"
+    ]
+    batter_merge_cols = ["batter", "game_pk", "game_date"] + batter_stat_cols
+    batter_subset = batter_rolling_df[
+        [c for c in batter_merge_cols if c in batter_rolling_df.columns]
+    ].copy()
+
+    pitcher_stat_cols = [
+        c for c in pitcher_rolling_df.columns if c.startswith("pitcher_")
+    ]
+    pitcher_merge_cols = ["pitcher", "game_pk", "game_date"] + pitcher_stat_cols
+    pitcher_subset = pitcher_rolling_df[
+        [c for c in pitcher_merge_cols if c in pitcher_rolling_df.columns]
+    ].copy()
+
+    merged = pa_df.merge(
+        batter_subset,
+        on=["batter", "game_pk", "game_date"],
+        how="left",
+    )
+    batter_matched = merged[batter_stat_cols[0]].notna().sum() if batter_stat_cols else 0
+    logger.info(
+        "Batter rolling merge: %d / %d PAs matched (%.1f%%)",
+        batter_matched,
+        len(pa_df),
+        100.0 * batter_matched / max(len(pa_df), 1),
+    )
+
+    merged = merged.merge(
+        pitcher_subset,
+        on=["pitcher", "game_pk", "game_date"],
+        how="left",
+    )
+    pitcher_matched = merged[pitcher_stat_cols[0]].notna().sum() if pitcher_stat_cols else 0
+    logger.info(
+        "Pitcher rolling merge: %d / %d PAs matched (%.1f%%)",
+        pitcher_matched,
+        len(pa_df),
+        100.0 * pitcher_matched / max(len(pa_df), 1),
+    )
+
+    return merged

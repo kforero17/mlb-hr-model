@@ -48,3 +48,12 @@ DATA_DIR = Path("data")
 RAW_DATA_DIR = DATA_DIR / "raw"
 PROCESSED_DATA_DIR = DATA_DIR / "processed"
 FEATURE_MATRIX_PATH = PROCESSED_DATA_DIR / "feature_matrix.parquet"
+
+PA_CONTEXT_COLUMNS: list[str] = [
+    "inning",
+    "outs_when_up",
+    "score_diff",
+    "is_home",
+    "runners_on_base",
+    "pa_number_in_game",
+]

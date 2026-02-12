@@ -16,14 +16,27 @@ from config.model_config import (
     TRAIN_TEST_SPLIT_DATE,
     VALIDATION_FRACTION,
 )
-from src.models.evaluation import evaluate_model, save_evaluation_report
+from src.models.evaluation import evaluate_game_level_composition, evaluate_model, save_evaluation_report
 
 logger = logging.getLogger(__name__)
 
 METADATA_COLUMNS: list[str] = [
     "batter", "game_pk", "game_date", "pitcher", "home_team", "away_team",
 ]
-TARGET_COLUMN: str = "hit_hr"
+
+LEAKY_COLUMNS: list[str] = [
+    "launch_speed", "launch_angle", "is_hit", "is_k", "is_bb", "is_barrel",
+    "events", "description", "at_bat_number", "inning_topbot",
+    "on_1b", "on_2b", "on_3b",
+    "release_speed", "plate_x", "plate_z", "pitch_type",
+    "release_spin_rate", "release_extension", "release_pos_x", "release_pos_z",
+    "pfx_x", "pfx_z", "vx0", "vy0", "vz0", "ax", "ay", "az",
+    "effective_speed", "zone", "pitch_number", "spin_axis",
+    "hit_distance_sc", "hc_x", "hc_y", "bb_type",
+    "home_score", "away_score",
+]
+
+TARGET_COLUMN: str = "is_hr"
 
 
 def load_feature_matrix() -> pd.DataFrame:
@@ -67,7 +80,7 @@ def time_based_split(
 
 
 def prepare_features(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.Series]:
-    exclude = set(METADATA_COLUMNS) | {TARGET_COLUMN}
+    exclude = set(METADATA_COLUMNS) | set(LEAKY_COLUMNS) | {TARGET_COLUMN}
     feature_cols = [c for c in df.columns if c not in exclude]
     X = df[feature_cols].copy()
     y = df[TARGET_COLUMN].copy()
@@ -158,13 +171,17 @@ def main() -> None:
 
     y_pred_proba = model.predict(X_test)
 
-    metrics = evaluate_model(y_test, y_pred_proba)
-    logger.info(f"Test metrics: {metrics}")
+    pa_metrics = evaluate_model(y_test, y_pred_proba)
+    logger.info(f"PA-level test metrics: {pa_metrics}")
+
+    game_metrics = evaluate_game_level_composition(test, y_pred_proba)
+    logger.info(f"Game-level test metrics: {game_metrics}")
 
     importances = model.feature_importance(importance_type="gain")
     feature_names = model.feature_name()
     save_evaluation_report(
-        metrics, feature_names, importances, y_test.values, y_pred_proba,
+        pa_metrics, feature_names, importances, y_test.values, y_pred_proba,
+        game_metrics=game_metrics,
     )
 
     save_model(model)
