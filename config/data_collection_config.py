@@ -47,6 +47,14 @@ BALLPARKS: dict[str, dict[str, float]] = {
     "Oracle Park": {"lat": 37.7786, "lon": -122.3893}
 }
 
+
+def season_dates(year: int) -> tuple[str, str]:
+    start, end = SEASON_DATE_RANGES.get(
+        year, (DEFAULT_SEASON_START, DEFAULT_SEASON_END)
+    )
+    return f"{year}-{start}", f"{year}-{end}"
+
+
 RATE_LIMIT_DELAY: float = 0.3
 WEATHER_RATE_LIMIT_DELAY: float = 1.0
 

@@ -3,12 +3,14 @@ from pathlib import Path
 
 import joblib
 import lightgbm as lgb
+import numpy as np
 import pandas as pd
 
 from config.feature_config import FEATURE_MATRIX_PATH
 from config.model_config import (
     CATEGORICAL_FEATURES,
     EARLY_STOPPING_ROUNDS,
+    HOLDOUT_DATE,
     LIGHTGBM_PARAMS,
     MAX_BOOST_ROUNDS,
     MODEL_PATH,
@@ -16,7 +18,21 @@ from config.model_config import (
     TRAIN_TEST_SPLIT_DATE,
     VALIDATION_FRACTION,
 )
-from src.models.evaluation import evaluate_game_level_composition, evaluate_model, save_evaluation_report
+from src.models.evaluation import (
+    apply_calibrator,
+    backtest_betting_strategy,
+    compute_bucket_hit_rates,
+    compute_daily_precision_recall_at_k,
+    evaluate_game_level_composition,
+    evaluate_model,
+    fit_calibrator,
+    save_evaluation_report,
+)
+from src.models.walk_forward_cv import (
+    WalkForwardResult,
+    aggregate_cv_metrics,
+    generate_cv_folds,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -108,6 +124,7 @@ def train_lightgbm(
     X_val: pd.DataFrame,
     y_val: pd.Series,
     categorical_features: list[str] | None = None,
+    params_override: dict | None = None,
 ) -> lgb.Booster:
     if categorical_features is None:
         categorical_features = [c for c in CATEGORICAL_FEATURES if c in X_train.columns]
@@ -120,6 +137,8 @@ def train_lightgbm(
     )
 
     params = {**LIGHTGBM_PARAMS}
+    if params_override:
+        params.update(params_override)
     params["scale_pos_weight"] = compute_scale_pos_weight(y_train)
 
     callbacks = [
@@ -155,36 +174,157 @@ def load_model(path: Path | None = None) -> lgb.Booster:
     return joblib.load(path)
 
 
+def run_walk_forward_cv(
+    df: pd.DataFrame,
+    params_override: dict | None = None,
+    max_folds: int | None = None,
+) -> WalkForwardResult:
+    holdout_ts = pd.Timestamp(HOLDOUT_DATE)
+    pre_holdout = df[df["game_date"] < holdout_ts].copy()
+
+    folds = generate_cv_folds(pre_holdout["game_date"])
+    if max_folds is not None and len(folds) > max_folds:
+        folds = folds[-max_folds:]
+    if not folds:
+        logger.warning("No walk-forward CV folds generated — skipping CV")
+        return WalkForwardResult(
+            fold_metrics=[], oof_indices=np.array([]),
+            oof_predictions=np.array([]), oof_actuals=np.array([]),
+            summary={"n_folds": 0},
+        )
+
+    all_fold_metrics: list[dict] = []
+    all_oof_indices: list[np.ndarray] = []
+    all_oof_predictions: list[np.ndarray] = []
+    all_oof_actuals: list[np.ndarray] = []
+
+    for fold in folds:
+        fold_train = pre_holdout[pre_holdout["game_date"] < fold.train_end]
+        fold_val = pre_holdout[
+            (pre_holdout["game_date"] >= fold.val_start)
+            & (pre_holdout["game_date"] < fold.val_end)
+        ]
+
+        if len(fold_val) == 0:
+            continue
+
+        fold_train = fold_train.sort_values("game_date").reset_index(drop=True)
+        es_size = max(int(len(fold_train) * VALIDATION_FRACTION), 1)
+        es_train = fold_train.iloc[:-es_size]
+        es_val = fold_train.iloc[-es_size:]
+
+        X_train, y_train = prepare_features(es_train)
+        X_es_val, y_es_val = prepare_features(es_val)
+        X_val, y_val = prepare_features(fold_val)
+
+        logger.info(
+            "Fold %d: train=%d (es_val=%d) | val=%d | %s to %s",
+            fold.fold_idx, len(es_train), len(es_val), len(fold_val),
+            fold.val_start.date(), fold.val_end.date(),
+        )
+
+        model = train_lightgbm(X_train, y_train, X_es_val, y_es_val, params_override=params_override)
+        y_pred = model.predict(X_val)
+
+        fold_metrics = evaluate_model(y_val.values, y_pred)
+        all_fold_metrics.append(fold_metrics)
+        all_oof_indices.append(fold_val.index.values)
+        all_oof_predictions.append(y_pred)
+        all_oof_actuals.append(y_val.values)
+
+    summary = aggregate_cv_metrics(all_fold_metrics)
+
+    logger.info(
+        "Walk-forward CV complete — %d folds | PR-AUC: %.4f ± %.4f | ROC-AUC: %.4f ± %.4f",
+        summary["n_folds"],
+        summary.get("pr_auc_mean", 0), summary.get("pr_auc_std", 0),
+        summary.get("roc_auc_mean", 0), summary.get("roc_auc_std", 0),
+    )
+
+    return WalkForwardResult(
+        fold_metrics=all_fold_metrics,
+        oof_indices=np.concatenate(all_oof_indices),
+        oof_predictions=np.concatenate(all_oof_predictions),
+        oof_actuals=np.concatenate(all_oof_actuals),
+        summary=summary,
+    )
+
+
 def main() -> None:
     logger.info("Starting model training pipeline")
 
     df = load_feature_matrix()
+
+    cv_result = run_walk_forward_cv(df)
+
     train, val, test = time_based_split(df)
 
     X_train, y_train = prepare_features(train)
     X_val, y_val = prepare_features(val)
     X_test, y_test = prepare_features(test)
 
-    logger.info(f"Feature count: {X_train.shape[1]}")
+    logger.info("Feature count: %d", X_train.shape[1])
 
     model = train_lightgbm(X_train, y_train, X_val, y_val)
 
     y_pred_proba = model.predict(X_test)
 
+    if len(cv_result.oof_actuals) > 0:
+        calibrator = fit_calibrator(cv_result.oof_actuals, cv_result.oof_predictions)
+        logger.info(
+            "Calibrator fitted on %d pooled OOF predictions from %d CV folds",
+            len(cv_result.oof_actuals), cv_result.summary["n_folds"],
+        )
+    else:
+        y_val_pred = model.predict(X_val)
+        calibrator = fit_calibrator(y_val.values, y_val_pred)
+
+    y_pred_calibrated = apply_calibrator(calibrator, y_pred_proba)
+
     pa_metrics = evaluate_model(y_test, y_pred_proba)
-    logger.info(f"PA-level test metrics: {pa_metrics}")
+    logger.info("PA-level test metrics (raw): %s", pa_metrics)
+
+    pa_metrics_calibrated = evaluate_model(y_test, y_pred_calibrated)
+    logger.info("PA-level test metrics (calibrated): %s", pa_metrics_calibrated)
 
     game_metrics = evaluate_game_level_composition(test, y_pred_proba)
-    logger.info(f"Game-level test metrics: {game_metrics}")
+    logger.info("Game-level test metrics (raw): %s", game_metrics)
+
+    game_metrics_calibrated = evaluate_game_level_composition(test, y_pred_calibrated)
+    logger.info("Game-level test metrics (calibrated): %s", game_metrics_calibrated)
+
+    game_dates_test = test["game_date"].values
+
+    daily_pk = compute_daily_precision_recall_at_k(
+        y_test.values, y_pred_calibrated, game_dates_test,
+    )
+    logger.info("Daily precision/recall at K: %s", daily_pk)
+
+    bucket_df = compute_bucket_hit_rates(y_test.values, y_pred_calibrated)
+
+    backtest = backtest_betting_strategy(y_test.values, y_pred_calibrated)
+    logger.info("Backtest results: %s", backtest)
+
+    betting_metrics = {**daily_pk, **backtest}
 
     importances = model.feature_importance(importance_type="gain")
     feature_names = model.feature_name()
     save_evaluation_report(
         pa_metrics, feature_names, importances, y_test.values, y_pred_proba,
         game_metrics=game_metrics,
+        calibrated_proba=y_pred_calibrated,
+        calibrated_metrics=pa_metrics_calibrated,
+        game_metrics_calibrated=game_metrics_calibrated,
+        betting_metrics=betting_metrics,
+        bucket_df=bucket_df,
+        game_dates=game_dates_test,
+        cv_summary=cv_result.summary,
+        cv_fold_metrics=cv_result.fold_metrics,
     )
 
     save_model(model)
+    joblib.dump(calibrator, MODELS_DIR / "calibrator.joblib")
+    logger.info("Calibrator saved to %s", MODELS_DIR / "calibrator.joblib")
 
     logger.info("Training pipeline complete")
 

@@ -4,15 +4,12 @@ import numpy as np
 import pandas as pd
 
 from config.feature_config import (
-    AL_TEAMS,
     AT_BAT_EXCLUSIONS,
-    BARREL_MAX_LAUNCH_ANGLE,
-    BARREL_MIN_EXIT_VELO,
-    BARREL_MIN_LAUNCH_ANGLE,
     HIT_EVENTS,
     MIN_GAMES_FOR_ROLLING,
     PLATE_APPEARANCE_EVENTS,
     ROLLING_WINDOWS,
+    STATCAST_BARREL_CODE,
 )
 
 logger = logging.getLogger(__name__)
@@ -33,14 +30,12 @@ def _safe_divide(numerator: pd.Series, denominator: pd.Series) -> pd.Series:
 
 
 def _is_barrel(df: pd.DataFrame) -> pd.Series:
-    return (
-        (df["launch_speed"] >= BARREL_MIN_EXIT_VELO)
-        & (df["launch_angle"] >= BARREL_MIN_LAUNCH_ANGLE)
-        & (df["launch_angle"] <= BARREL_MAX_LAUNCH_ANGLE)
-    )
+    if "launch_speed_angle" in df.columns:
+        return df["launch_speed_angle"] == STATCAST_BARREL_CODE
+    return pd.Series(0, index=df.index)
 
 
-def _compute_rolling_rates(
+def compute_rolling_rates(
     df: pd.DataFrame,
     group_col: str,
     rate_columns: dict[str, str | tuple[str, str]],
@@ -83,19 +78,12 @@ def _compute_hr_streak(series: pd.Series, window: int) -> pd.Series:
 
 
 def _compute_games_since_last_hr(hr_series: pd.Series) -> pd.Series:
-    result = pd.Series(np.nan, index=hr_series.index)
-    games_since = np.nan
-    for i, had_hr in enumerate(hr_series):
-        if i == 0:
-            result.iloc[i] = np.nan
-        else:
-            result.iloc[i] = games_since
-        if had_hr > 0:
-            games_since = 0
-        elif np.isnan(games_since):
-            games_since = np.nan
-        else:
-            games_since += 1
+    had_hr = hr_series > 0
+    hr_groups = had_hr.cumsum()
+    games_since = hr_groups.groupby(hr_groups).cumcount()
+    result = games_since.shift(1)
+    before_first_hr = hr_groups.shift(1, fill_value=0) == 0
+    result[before_first_hr] = np.nan
     return result
 
 
@@ -185,7 +173,7 @@ def compute_batter_rolling_stats(
         "batting_avg": ("n_hits", "n_ab"),
     }
 
-    df = _compute_rolling_rates(df, "batter", rate_columns, windows, "batter")
+    df = compute_rolling_rates(df, "batter", rate_columns, windows, "batter")
 
     for w in windows:
         df[f"batter_hr_streak_{w}g"] = df.groupby("batter")["hit_hr"].transform(
@@ -261,7 +249,7 @@ def _apply_pitcher_rolling(
     df = df.copy()
     df["_whip_num"] = df["n_hits_against"] + df["n_bb_against"]
 
-    df = _compute_rolling_rates(df, "pitcher", rate_columns, windows, "pitcher")
+    df = compute_rolling_rates(df, "pitcher", rate_columns, windows, "pitcher")
 
     if "_whip_num" in df.columns:
         df.drop(columns=["_whip_num"], inplace=True)
@@ -290,7 +278,6 @@ def add_game_context_features(df: pd.DataFrame) -> pd.DataFrame:
 
     df["month"] = df["game_date"].dt.month
     df["day_of_week"] = df["game_date"].dt.dayofweek
-    df["is_dh"] = df["home_team"].isin(AL_TEAMS).astype(int)
 
     logger.info("Game context features added")
     return df

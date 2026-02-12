@@ -24,9 +24,18 @@ AT_BAT_EXCLUSIONS: list[str] = [
     "sac_bunt_double_play", "catcher_interf",
 ]
 
-BARREL_MIN_EXIT_VELO: float = 98.0
-BARREL_MIN_LAUNCH_ANGLE: float = 26.0
-BARREL_MAX_LAUNCH_ANGLE: float = 30.0
+STATCAST_BARREL_CODE: int = 6
+
+HARD_HIT_MIN_EXIT_VELO: float = 95.0
+SWEET_SPOT_MIN_ANGLE: float = 8.0
+SWEET_SPOT_MAX_ANGLE: float = 32.0
+SPRAY_ANGLE_PULL_THRESHOLD: float = 15.0
+SPRAY_HOME_X: float = 125.42
+SPRAY_HOME_Y: float = 198.27
+
+FASTBALL_TYPES: set[str] = {"FF", "SI", "FC", "FA"}
+BREAKING_TYPES: set[str] = {"SL", "CU", "KC", "ST", "SV", "CS", "KN"}
+OFFSPEED_TYPES: set[str] = {"CH", "FS", "EP"}
 
 BATTER_ROLLING_FEATURES: list[str] = [
     "hr_rate", "barrel_rate", "avg_exit_velo", "avg_launch_angle",
@@ -36,12 +45,6 @@ BATTER_ROLLING_FEATURES: list[str] = [
 PITCHER_ROLLING_FEATURES: list[str] = [
     "hr_allowed_rate", "barrel_rate_against", "avg_exit_velo_against",
     "k_rate", "bb_rate", "whip_proxy",
-]
-
-AL_TEAMS: list[str] = [
-    "NYY", "BOS", "TOR", "BAL", "TB",
-    "CLE", "CWS", "DET", "KC", "MIN",
-    "HOU", "LAA", "OAK", "SEA", "TEX",
 ]
 
 DATA_DIR = Path("data")
@@ -56,4 +59,46 @@ PA_CONTEXT_COLUMNS: list[str] = [
     "is_home",
     "runners_on_base",
     "pa_number_in_game",
+]
+
+ENVIRONMENT_FEATURES: list[str] = [
+    "park_hr_factor",
+    "park_hr_factor_handedness",
+    "elevation_ft",
+    "roof_type",
+    "temp_f",
+    "wind_speed_mph",
+    "wind_dir_deg",
+    "humidity_pct",
+    "wind_out_to_cf",
+    "air_density_index",
+]
+
+WEATHER_DATA_PATH = RAW_DATA_DIR / "weather_games.parquet"
+
+OPPORTUNITY_FEATURES: list[str] = [
+    "batting_order_pos",
+    "batting_order_avg",
+    "team_runs_per_game",
+    "expected_pas",
+]
+
+BATTER_SKILL_FEATURES: list[str] = [
+    "fly_ball_rate",
+    "pull_rate",
+    "hard_hit_rate",
+    "sweet_spot_pct",
+    "avg_xslg",
+    "avg_xwoba",
+    "hr_rate_vs_fastball",
+    "hr_rate_vs_breaking",
+    "hr_rate_vs_offspeed",
+]
+
+PITCHER_SKILL_FEATURES: list[str] = [
+    "gb_rate",
+    "fb_rate",
+    "fastball_pct",
+    "breaking_pct",
+    "offspeed_pct",
 ]

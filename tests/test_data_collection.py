@@ -6,13 +6,13 @@ import pandas as pd
 import pytest
 from unittest.mock import patch, MagicMock
 
+from config.data_collection_config import season_dates
 from src.data.collect_data import (
     fetch_statcast_season,
     fetch_player_data,
     collect_season,
     combine_all_seasons,
     main,
-    _season_dates,
     _already_collected,
 )
 
@@ -51,13 +51,13 @@ def sample_statcast_data():
 
 
 def test_season_dates_known_year():
-    start, end = _season_dates(2022)
+    start, end = season_dates(2022)
     assert start == "2022-04-07"
     assert end == "2022-10-05"
 
 
 def test_season_dates_unknown_year():
-    start, end = _season_dates(2030)
+    start, end = season_dates(2030)
     assert start == "2030-03-20"
     assert end == "2030-10-05"
 

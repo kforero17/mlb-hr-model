@@ -24,7 +24,8 @@ class TestEvaluateModel:
         metrics = evaluate_model(y_true, y_pred_proba)
 
         expected_keys = {"pr_auc", "roc_auc", "precision", "recall", "f1",
-                         "n_positive", "n_total", "positive_rate"}
+                         "n_positive", "n_total", "positive_rate",
+                         "brier_score", "log_loss"}
         assert set(metrics.keys()) == expected_keys
 
     def test_metric_values_in_valid_ranges(self):
@@ -103,7 +104,8 @@ class TestEvaluateGameLevelComposition:
         result = evaluate_game_level_composition(test_df, pa_pred_proba)
 
         expected_keys = {"pr_auc", "roc_auc", "precision", "recall", "f1",
-                         "n_positive", "n_total", "positive_rate"}
+                         "n_positive", "n_total", "positive_rate",
+                         "brier_score", "log_loss"}
         assert set(result.keys()) == expected_keys
 
         df_check = test_df.copy()

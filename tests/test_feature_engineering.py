@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from config.feature_config import AL_TEAMS, HIT_EVENTS, PLATE_APPEARANCE_EVENTS
+from config.feature_config import HIT_EVENTS, PLATE_APPEARANCE_EVENTS
 from src.features.feature_engineering import (
     add_game_context_features,
     add_platoon_features,
@@ -26,14 +26,14 @@ def pitch_level_data():
     base = dict(
         batter=100, pitcher=900, game_pk=1, game_date="2023-06-01",
         home_team="NYY", away_team="BOS", stand="R", p_throws="L",
-        inning_topbot="Bot",
+        inning_topbot="Bot", launch_speed_angle=np.nan,
     )
     rows.append({**base, "at_bat_number": 1, "events": np.nan,
                  "launch_speed": np.nan, "launch_angle": np.nan,
                  "description": "ball",
                  "inning": 1, "outs_when_up": 0, "home_score": 0, "away_score": 0})
     rows.append({**base, "at_bat_number": 1, "events": "home_run",
-                 "launch_speed": 105.0, "launch_angle": 28.0,
+                 "launch_speed": 105.0, "launch_angle": 28.0, "launch_speed_angle": 6,
                  "description": "hit_into_play",
                  "inning": 1, "outs_when_up": 0, "home_score": 0, "away_score": 0})
     rows.append({**base, "at_bat_number": 2, "events": np.nan,
@@ -72,10 +72,10 @@ def pitch_level_data():
     base3 = dict(
         batter=200, pitcher=900, game_pk=1, game_date="2023-06-01",
         home_team="NYY", away_team="BOS", stand="L", p_throws="L",
-        inning_topbot="Top",
+        inning_topbot="Top", launch_speed_angle=np.nan,
     )
     rows.append({**base3, "at_bat_number": 1, "events": "home_run",
-                 "launch_speed": 110.0, "launch_angle": 27.0,
+                 "launch_speed": 110.0, "launch_angle": 27.0, "launch_speed_angle": 6,
                  "description": "hit_into_play",
                  "inning": 1, "outs_when_up": 2, "home_score": 0, "away_score": 0})
     rows.append({**base3, "at_bat_number": 2, "events": "walk",
@@ -259,18 +259,6 @@ class TestAddGameContextFeatures:
 
         assert list(result["month"]) == [7, 9]
         assert result["day_of_week"].iloc[0] == pd.Timestamp("2023-07-04").dayofweek
-
-    def test_is_dh_based_on_al_teams(self):
-        df = pd.DataFrame({
-            "game_date": ["2023-06-01", "2023-06-01"],
-            "home_team": ["NYY", "LAD"],
-            "is_home": [1, 0],
-        })
-
-        result = add_game_context_features(df)
-
-        assert result["is_dh"].iloc[0] == 1  # NYY is AL
-        assert result["is_dh"].iloc[1] == 0  # LAD is NL
 
 
 # ---------------------------------------------------------------------------

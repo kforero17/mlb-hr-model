@@ -42,7 +42,8 @@ def create_sample_statcast_data():
         'away_team': ['NYY', 'NYY', 'BOS'],
         'home_score': [3, 2, 5],
         'away_score': [2, 1, 3],
-        'stadium': ['Angel Stadium', 'Angel Stadium', 'Yankee Stadium']
+        'stadium': ['Angel Stadium', 'Angel Stadium', 'Yankee Stadium'],
+        'launch_speed_angle': [5, 3, 6],
     })
 
 def test_process_statcast_data():

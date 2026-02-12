@@ -42,5 +42,5 @@ Thumbs.db
 
 # Project specific
 .env
-data/
+/data/
 *.log 

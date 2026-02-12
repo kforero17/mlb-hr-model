@@ -9,6 +9,23 @@ from config.feature_config import (
     RAW_DATA_DIR,
     ROLLING_WINDOWS,
 )
+from src.data.collect_weather import load_weather_data
+from src.features.environment_features import (
+    add_environment_features,
+    compute_park_hr_factors,
+)
+from src.features.opportunity_features import (
+    add_opportunity_features,
+    compute_team_rolling_runs,
+    derive_batting_order,
+)
+from src.features.skill_features import (
+    aggregate_batter_skill_stats,
+    aggregate_pitcher_skill_stats,
+    compute_batter_skill_rolling,
+    compute_pitcher_skill_rolling,
+    merge_skill_features_onto_pas,
+)
 from src.features.feature_engineering import (
     add_game_context_features,
     add_platoon_features,
@@ -77,6 +94,33 @@ def build_feature_matrix() -> pd.DataFrame:
 
     logger.info("Adding game context features")
     feature_df = add_game_context_features(feature_df)
+
+    logger.info("Computing park HR factors")
+    park_factors = compute_park_hr_factors(raw_data)
+
+    logger.info("Loading weather data")
+    weather = load_weather_data()
+
+    logger.info("Adding environment features")
+    feature_df = add_environment_features(feature_df, park_factors, weather)
+
+    logger.info("Deriving batting order and team run rates")
+    batting_order = derive_batting_order(raw_data)
+    team_runs = compute_team_rolling_runs(raw_data)
+
+    logger.info("Adding opportunity features")
+    feature_df = add_opportunity_features(feature_df, batting_order, team_runs)
+
+    logger.info("Aggregating batter skill stats")
+    batter_skill = aggregate_batter_skill_stats(raw_data)
+    batter_skill = compute_batter_skill_rolling(batter_skill, windows=ROLLING_WINDOWS)
+
+    logger.info("Aggregating pitcher skill stats")
+    pitcher_skill = aggregate_pitcher_skill_stats(raw_data)
+    pitcher_skill = compute_pitcher_skill_rolling(pitcher_skill, windows=ROLLING_WINDOWS)
+
+    logger.info("Merging skill features onto PA rows")
+    feature_df = merge_skill_features_onto_pas(feature_df, batter_skill, pitcher_skill)
 
     logger.info(
         f"Feature matrix complete: {feature_df.shape[0]:,} rows, "
