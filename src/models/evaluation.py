@@ -122,6 +122,17 @@ def compute_probability_distribution(y_pred_proba: np.ndarray) -> dict:
     }
 
 
+def correct_scale_pos_weight(
+    y_pred_proba: np.ndarray,
+    scale_pos_weight: float,
+) -> np.ndarray:
+    eps = 1e-15
+    clipped = np.clip(y_pred_proba, eps, 1.0 - eps)
+    logits = np.log(clipped / (1.0 - clipped))
+    corrected_logits = logits - np.log(scale_pos_weight)
+    return 1.0 / (1.0 + np.exp(-corrected_logits))
+
+
 def plot_precision_recall_curve(
     y_true: np.ndarray,
     y_pred_proba: np.ndarray,
@@ -263,7 +274,7 @@ def evaluate_game_level_composition(
 def fit_calibrator(
     y_val: np.ndarray,
     y_val_pred_proba: np.ndarray,
-    method: str = "isotonic",
+    method: str = "platt",
 ) -> IsotonicRegression | LogisticRegression:
     if method == "isotonic":
         calibrator = IsotonicRegression(y_min=0, y_max=1, out_of_bounds="clip")
@@ -504,6 +515,36 @@ def backtest_betting_strategy(
     return result
 
 
+def compute_edge_distribution(
+    y_pred_proba: np.ndarray,
+    market_probs: np.ndarray,
+    bins: list[float] | None = None,
+) -> pd.DataFrame:
+    if bins is None:
+        bins = [-1.0, -0.04, -0.02, -0.01, 0.0, 0.01, 0.02, 0.04, 0.06, 0.10, 1.0]
+
+    edges = y_pred_proba - market_probs
+    labels = [
+        f"{bins[i]:+.2f} to {bins[i + 1]:+.2f}"
+        for i in range(len(bins) - 1)
+    ]
+    bucket_indices = np.digitize(edges, bins) - 1
+    bucket_indices = np.clip(bucket_indices, 0, len(labels) - 1)
+
+    rows: list[dict] = []
+    for i, label in enumerate(labels):
+        mask = bucket_indices == i
+        rows.append({
+            "edge_bin": label,
+            "count": int(mask.sum()),
+            "pct": round(float(mask.sum()) / len(edges) * 100, 2) if len(edges) > 0 else 0.0,
+        })
+
+    edge_df = pd.DataFrame(rows)
+    logger.info("Edge distribution:\n%s", edge_df.to_string(index=False))
+    return edge_df
+
+
 def _format_metrics_block(m: dict, title: str) -> list[str]:
     lines: list[str] = []
     lines.append(title)
@@ -608,6 +649,7 @@ def save_evaluation_report(
     multi_threshold_df: pd.DataFrame | None = None,
     prob_dist_raw: dict | None = None,
     prob_dist_calibrated: dict | None = None,
+    edge_dist_df: pd.DataFrame | None = None,
     cv_summary: dict | None = None,
     cv_fold_metrics: list[dict] | None = None,
     output_dir: Path | None = None,
@@ -650,6 +692,12 @@ def save_evaluation_report(
         lines.append("-" * 40)
         for k, v in prob_dist_calibrated.items():
             lines.append(f"  {k:<8s} {v:.6f}")
+        lines.append("")
+
+    if edge_dist_df is not None:
+        lines.append("Edge Distribution (model - market)")
+        lines.append("-" * 40)
+        lines.append(edge_dist_df.to_string(index=False))
         lines.append("")
 
     if multi_threshold_df is not None:

@@ -35,6 +35,7 @@ from src.features.feature_engineering import (
     compute_pitcher_rolling_stats,
     merge_rolling_stats_onto_pas,
 )
+from src.features.interaction_features import add_interaction_features
 
 logger = logging.getLogger(__name__)
 
@@ -121,6 +122,9 @@ def build_feature_matrix() -> pd.DataFrame:
 
     logger.info("Merging skill features onto PA rows")
     feature_df = merge_skill_features_onto_pas(feature_df, batter_skill, pitcher_skill)
+
+    logger.info("Adding interaction features")
+    feature_df = add_interaction_features(feature_df)
 
     logger.info(
         f"Feature matrix complete: {feature_df.shape[0]:,} rows, "

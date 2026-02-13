@@ -7,6 +7,7 @@ from src.models.train_model import (
     ENGINEERED_PREFIXES,
     METADATA_COLUMNS,
     TARGET_COLUMN,
+    _select_feature_columns,
     compute_scale_pos_weight,
     prepare_features,
     time_based_split,
@@ -162,3 +163,25 @@ class TestTrainLightGBM:
         preds = model.predict(X_val)
         assert preds.shape == (n_val,)
         assert np.all((preds >= 0) & (preds <= 1))
+
+
+# ---------------------------------------------------------------------------
+# _select_feature_columns — interaction prefix
+# ---------------------------------------------------------------------------
+
+class TestSelectFeatureColumnsInteraction:
+
+    def test_selects_ix_prefixed_columns(self):
+        df = pd.DataFrame({
+            "inning": [3],
+            "ix_barrel_x_fb_rate": [0.05],
+            "ix_platoon_x_hr_rate": [0.02],
+            "some_other_col": [1.0],
+        })
+
+        selected = _select_feature_columns(df)
+
+        assert "ix_barrel_x_fb_rate" in selected
+        assert "ix_platoon_x_hr_rate" in selected
+        assert "inning" in selected
+        assert "some_other_col" not in selected

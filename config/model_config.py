@@ -37,6 +37,8 @@ TUNING_BRIER_WEIGHT: float = 2.0
 
 TOP_N_FEATURES: int = 20
 
+CALIBRATION_METHOD: str = "platt"
+
 CATEGORICAL_FEATURES: list[str] = ["stand", "p_throws", "platoon", "inning", "roof_type"]
 
 MODELS_DIR = Path("data/models")

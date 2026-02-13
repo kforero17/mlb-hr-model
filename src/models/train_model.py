@@ -9,6 +9,7 @@ import pandas as pd
 
 from config.feature_config import FEATURE_MATRIX_PATH
 from config.model_config import (
+    CALIBRATION_METHOD,
     CATEGORICAL_FEATURES,
     EARLY_STOPPING_ROUNDS,
     HOLDOUT_DATE,
@@ -25,8 +26,10 @@ from src.models.evaluation import (
     backtest_betting_strategy,
     compute_bucket_hit_rates,
     compute_daily_precision_recall_at_k,
+    compute_edge_distribution,
     compute_multi_threshold_report,
     compute_probability_distribution,
+    correct_scale_pos_weight,
     evaluate_game_level_composition,
     evaluate_model,
     fit_calibrator,
@@ -59,6 +62,7 @@ ENGINEERED_PREFIXES: list[str] = [
     "pitcher_fastball_pct_", "pitcher_breaking_pct_",
     "pitcher_offspeed_pct_",
     "games_since_last_hr",
+    "ix_",
 ]
 
 FEATURE_COLUMNS: list[str] = [
@@ -266,7 +270,9 @@ def run_walk_forward_cv(
         )
 
         model = train_lightgbm(X_train, y_train, X_es_val, y_es_val, params_override=params_override)
-        y_pred = model.predict(X_val)
+        y_pred_raw = model.predict(X_val)
+        spw = model.params.get("scale_pos_weight", 1.0)
+        y_pred = correct_scale_pos_weight(y_pred_raw, spw)
 
         fold_metrics = evaluate_model(y_val.values, y_pred)
         all_fold_metrics.append(fold_metrics)
@@ -312,21 +318,30 @@ def main() -> None:
     model = train_lightgbm(X_train, y_train, X_val, y_val, params_override=tuned_params)
 
     y_pred_proba = model.predict(X_test)
+    spw = model.params.get("scale_pos_weight", 1.0)
+    y_pred_corrected = correct_scale_pos_weight(y_pred_proba, spw)
 
     if len(cv_result.oof_actuals) > 0:
-        calibrator = fit_calibrator(cv_result.oof_actuals, cv_result.oof_predictions)
+        calibrator = fit_calibrator(
+            cv_result.oof_actuals, cv_result.oof_predictions,
+            method=CALIBRATION_METHOD,
+        )
         logger.info(
             "Calibrator fitted on %d pooled OOF predictions from %d CV folds",
             len(cv_result.oof_actuals), cv_result.summary["n_folds"],
         )
     else:
         y_val_pred = model.predict(X_val)
-        calibrator = fit_calibrator(y_val.values, y_val_pred)
+        y_val_corrected = correct_scale_pos_weight(y_val_pred, spw)
+        calibrator = fit_calibrator(y_val.values, y_val_corrected, method=CALIBRATION_METHOD)
 
-    y_pred_calibrated = apply_calibrator(calibrator, y_pred_proba)
+    y_pred_calibrated = apply_calibrator(calibrator, y_pred_corrected)
 
-    pa_metrics = evaluate_model(y_test, y_pred_proba)
-    logger.info("PA-level test metrics (raw): %s", pa_metrics)
+    pa_metrics_raw = evaluate_model(y_test, y_pred_proba)
+    logger.info("PA-level test metrics (raw): %s", pa_metrics_raw)
+
+    pa_metrics_corrected = evaluate_model(y_test, y_pred_corrected)
+    logger.info("PA-level test metrics (corrected): %s", pa_metrics_corrected)
 
     pa_metrics_calibrated = evaluate_model(y_test, y_pred_calibrated)
     logger.info("PA-level test metrics (calibrated): %s", pa_metrics_calibrated)
@@ -338,7 +353,12 @@ def main() -> None:
     logger.info("Game-level test metrics (calibrated): %s", game_metrics_calibrated)
 
     prob_dist_raw = compute_probability_distribution(y_pred_proba)
+    prob_dist_corrected = compute_probability_distribution(y_pred_corrected)
     prob_dist_calibrated = compute_probability_distribution(y_pred_calibrated)
+    logger.info("Probability distribution (raw): %s", prob_dist_raw)
+    logger.info("Probability distribution (corrected): %s", prob_dist_corrected)
+    logger.info("Probability distribution (calibrated): %s", prob_dist_calibrated)
+
     multi_threshold_df = compute_multi_threshold_report(y_test.values, y_pred_calibrated)
 
     game_dates_test = test["game_date"].values
@@ -350,6 +370,10 @@ def main() -> None:
 
     bucket_df = compute_bucket_hit_rates(y_test.values, y_pred_calibrated)
 
+    base_rate = y_test.values.mean() if len(y_test) > 0 else 0.03
+    market_probs = np.full(len(y_test), base_rate)
+    edge_dist_df = compute_edge_distribution(y_pred_calibrated, market_probs)
+
     backtest = backtest_betting_strategy(y_test.values, y_pred_calibrated)
     logger.info("Backtest results: %s", backtest)
 
@@ -358,7 +382,7 @@ def main() -> None:
     importances = model.feature_importance(importance_type="gain")
     feature_names = model.feature_name()
     save_evaluation_report(
-        pa_metrics, feature_names, importances, y_test.values, y_pred_proba,
+        pa_metrics_raw, feature_names, importances, y_test.values, y_pred_proba,
         game_metrics=game_metrics,
         calibrated_proba=y_pred_calibrated,
         calibrated_metrics=pa_metrics_calibrated,
@@ -366,11 +390,12 @@ def main() -> None:
         betting_metrics=betting_metrics,
         bucket_df=bucket_df,
         game_dates=game_dates_test,
-        cv_summary=cv_result.summary,
-        cv_fold_metrics=cv_result.fold_metrics,
         multi_threshold_df=multi_threshold_df,
         prob_dist_raw=prob_dist_raw,
         prob_dist_calibrated=prob_dist_calibrated,
+        edge_dist_df=edge_dist_df,
+        cv_summary=cv_result.summary,
+        cv_fold_metrics=cv_result.fold_metrics,
     )
 
     save_model(model)

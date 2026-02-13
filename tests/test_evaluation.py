@@ -3,8 +3,10 @@ import pandas as pd
 import pytest
 
 from src.models.evaluation import (
+    compute_edge_distribution,
     compute_multi_threshold_report,
     compute_probability_distribution,
+    correct_scale_pos_weight,
     evaluate_game_level_composition,
     evaluate_model,
     find_f1_optimal_threshold,
@@ -223,3 +225,67 @@ class TestSaveEvaluationReport:
         assert "0.4500" in report_text  # PR-AUC
         assert "0.8200" in report_text  # ROC-AUC
         assert "Game-Level" in report_text
+
+
+# ---------------------------------------------------------------------------
+# correct_scale_pos_weight
+# ---------------------------------------------------------------------------
+
+class TestCorrectScalePosWeight:
+
+    def test_identity_when_weight_is_one(self):
+        proba = np.array([0.01, 0.03, 0.10, 0.50, 0.90])
+
+        corrected = correct_scale_pos_weight(proba, 1.0)
+
+        np.testing.assert_allclose(corrected, proba, atol=1e-10)
+
+    def test_shifts_probabilities_downward_for_large_weight(self):
+        proba = np.array([0.30, 0.50, 0.70])
+
+        corrected = correct_scale_pos_weight(proba, 32.0)
+
+        assert np.all(corrected < proba)
+
+    def test_round_trip_logit_correction(self):
+        true_prob = 0.03
+        spw = 32.0
+        shifted_logit = np.log(true_prob / (1 - true_prob)) + np.log(spw)
+        shifted_prob = 1.0 / (1.0 + np.exp(-shifted_logit))
+
+        recovered = correct_scale_pos_weight(np.array([shifted_prob]), spw)
+
+        assert recovered[0] == pytest.approx(true_prob, rel=1e-6)
+
+    def test_output_stays_in_zero_one_range(self):
+        proba = np.array([1e-10, 0.5, 1.0 - 1e-10])
+
+        corrected = correct_scale_pos_weight(proba, 100.0)
+
+        assert np.all(corrected >= 0.0)
+        assert np.all(corrected <= 1.0)
+
+
+# ---------------------------------------------------------------------------
+# compute_edge_distribution
+# ---------------------------------------------------------------------------
+
+class TestComputeEdgeDistribution:
+
+    def test_returns_dataframe_with_expected_columns(self):
+        pred = np.array([0.05, 0.03, 0.04, 0.02])
+        market = np.array([0.03, 0.03, 0.03, 0.03])
+
+        result = compute_edge_distribution(pred, market)
+
+        assert isinstance(result, pd.DataFrame)
+        assert set(result.columns) == {"edge_bin", "count", "pct"}
+
+    def test_all_predictions_counted(self):
+        pred = np.array([0.05, 0.03, 0.04, 0.02, 0.10])
+        market = np.array([0.03, 0.03, 0.03, 0.03, 0.03])
+
+        result = compute_edge_distribution(pred, market)
+
+        assert result["count"].sum() == 5
+        assert result["pct"].sum() == pytest.approx(100.0)
