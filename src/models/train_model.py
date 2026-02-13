@@ -40,19 +40,24 @@ METADATA_COLUMNS: list[str] = [
     "batter", "game_pk", "game_date", "pitcher", "home_team", "away_team",
 ]
 
-LEAKY_COLUMNS: list[str] = [
-    "launch_speed", "launch_angle", "is_hit", "is_k", "is_bb", "is_barrel",
-    "events", "description", "at_bat_number", "inning_topbot",
-    "on_1b", "on_2b", "on_3b",
-    "release_speed", "plate_x", "plate_z", "pitch_type",
-    "release_spin_rate", "release_extension", "release_pos_x", "release_pos_z",
-    "pfx_x", "pfx_z", "vx0", "vy0", "vz0", "ax", "ay", "az",
-    "effective_speed", "zone", "pitch_number", "spin_axis",
-    "hit_distance_sc", "hc_x", "hc_y", "bb_type",
-    "home_score", "away_score",
+TARGET_COLUMN: str = "is_hr"
+
+FEATURE_PREFIXES: list[str] = [
+    "batter_", "pitcher_", "games_since_",
 ]
 
-TARGET_COLUMN: str = "is_hr"
+FEATURE_COLUMNS: list[str] = [
+    "inning", "outs_when_up", "score_diff", "is_home",
+    "runners_on_base", "pa_number_in_game",
+    "month", "day_of_week",
+    "stand", "p_throws", "platoon", "platoon_advantage",
+    "park_hr_factor", "park_hr_factor_handedness",
+    "elevation_ft", "roof_type",
+    "temp_f", "wind_speed_mph", "wind_dir_deg", "humidity_pct",
+    "wind_out_to_cf", "air_density_index",
+    "batting_order_pos", "batting_order_avg",
+    "team_runs_per_game", "expected_pas",
+]
 
 
 def load_feature_matrix() -> pd.DataFrame:
@@ -60,9 +65,11 @@ def load_feature_matrix() -> pd.DataFrame:
     df["game_date"] = pd.to_datetime(df["game_date"])
     hr_rate = df[TARGET_COLUMN].mean()
     logger.info(
-        f"Loaded feature matrix: {df.shape[0]:,} rows x {df.shape[1]} columns | "
-        f"dates {df['game_date'].min().date()} to {df['game_date'].max().date()} | "
-        f"HR rate: {hr_rate:.4f}"
+        "Loaded feature matrix: %d rows x %d columns | "
+        "dates %s to %s | HR rate: %.4f",
+        df.shape[0], df.shape[1],
+        df["game_date"].min().date(), df["game_date"].max().date(),
+        hr_rate,
     )
     return df
 
@@ -95,9 +102,18 @@ def time_based_split(
     return train, val, test
 
 
+def _select_feature_columns(df: pd.DataFrame) -> list[str]:
+    feature_cols: list[str] = []
+    for col in df.columns:
+        if col in FEATURE_COLUMNS:
+            feature_cols.append(col)
+        elif any(col.startswith(p) for p in FEATURE_PREFIXES):
+            feature_cols.append(col)
+    return feature_cols
+
+
 def prepare_features(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.Series]:
-    exclude = set(METADATA_COLUMNS) | set(LEAKY_COLUMNS) | {TARGET_COLUMN}
-    feature_cols = [c for c in df.columns if c not in exclude]
+    feature_cols = _select_feature_columns(df)
     X = df[feature_cols].copy()
     y = df[TARGET_COLUMN].copy()
 

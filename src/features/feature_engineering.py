@@ -17,10 +17,10 @@ logger = logging.getLogger(__name__)
 def _filter_plate_appearances(df: pd.DataFrame) -> pd.DataFrame:
     pa_df = df[df["events"].notna()].copy()
     pa_df = pa_df[pa_df["events"].isin(PLATE_APPEARANCE_EVENTS)].copy()
-    pa_df["is_hr"] = (pa_df["events"] == "home_run").astype(int)
-    pa_df["is_hit"] = pa_df["events"].isin(HIT_EVENTS).astype(int)
-    pa_df["is_k"] = pa_df["events"].str.startswith("strikeout").astype(int)
-    pa_df["is_bb"] = pa_df["events"].isin(["walk", "hit_by_pitch", "intent_walk"]).astype(int)
+    pa_df["is_hr"] = (pa_df["events"] == "home_run").fillna(False).astype(int)
+    pa_df["is_hit"] = pa_df["events"].isin(HIT_EVENTS).fillna(False).astype(int)
+    pa_df["is_k"] = pa_df["events"].str.startswith("strikeout").fillna(False).astype(int)
+    pa_df["is_bb"] = pa_df["events"].isin(["walk", "hit_by_pitch", "intent_walk"]).fillna(False).astype(int)
     pa_df["is_barrel"] = _is_barrel(pa_df).astype(int)
     return pa_df
 
@@ -31,8 +31,8 @@ def _safe_divide(numerator: pd.Series, denominator: pd.Series) -> pd.Series:
 
 def _is_barrel(df: pd.DataFrame) -> pd.Series:
     if "launch_speed_angle" in df.columns:
-        return df["launch_speed_angle"] == STATCAST_BARREL_CODE
-    return pd.Series(0, index=df.index)
+        return (df["launch_speed_angle"] == STATCAST_BARREL_CODE).fillna(False)
+    return pd.Series(False, index=df.index)
 
 
 def compute_rolling_rates(
@@ -92,7 +92,7 @@ def aggregate_to_batter_game(df: pd.DataFrame) -> pd.DataFrame:
     df["game_date"] = pd.to_datetime(df["game_date"])
 
     pa_df = _filter_plate_appearances(df)
-    pa_df["is_ab_exclusion"] = pa_df["events"].isin(AT_BAT_EXCLUSIONS).astype(int)
+    pa_df["is_ab_exclusion"] = pa_df["events"].isin(AT_BAT_EXCLUSIONS).fillna(False).astype(int)
 
     logger.info(
         "Aggregating %d plate-appearance rows to batter-game level",

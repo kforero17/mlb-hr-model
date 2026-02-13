@@ -4,7 +4,6 @@ import pytest
 import lightgbm as lgb
 
 from src.models.train_model import (
-    LEAKY_COLUMNS,
     METADATA_COLUMNS,
     TARGET_COLUMN,
     compute_scale_pos_weight,
@@ -57,7 +56,7 @@ class TestTimeBasedSplit:
 
 class TestPrepareFeatures:
 
-    def test_excludes_metadata_and_target_columns(self):
+    def test_selects_only_whitelisted_feature_columns(self):
         df = pd.DataFrame({
             "batter": [1, 2],
             "game_pk": [10, 20],
@@ -67,8 +66,9 @@ class TestPrepareFeatures:
             "away_team": ["BOS", "NYY"],
             "is_hr": [0, 1],
             "launch_speed": [100.0, 95.0],
-            "feature_a": [1.5, 2.5],
-            "feature_b": [3.0, 4.0],
+            "inning": [3, 5],
+            "score_diff": [1.0, -2.0],
+            "batter_hr_rate_15g": [0.05, 0.08],
             "stand": ["R", "L"],
         })
 
@@ -78,6 +78,8 @@ class TestPrepareFeatures:
             assert col not in X.columns
 
         assert "launch_speed" not in X.columns
+        assert "inning" in X.columns
+        assert "batter_hr_rate_15g" in X.columns
         assert list(y) == [0, 1]
 
     def test_categorical_columns_converted_to_category_dtype(self):
@@ -87,7 +89,7 @@ class TestPrepareFeatures:
             "pitcher": [100], "home_team": ["NYY"], "away_team": ["BOS"],
             "is_hr": [0],
             "stand": ["R"], "p_throws": ["L"], "platoon": ["R_vs_L"],
-            "feature_a": [1.0],
+            "inning": [3],
         })
 
         X, _ = prepare_features(df)

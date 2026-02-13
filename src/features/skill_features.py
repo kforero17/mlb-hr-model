@@ -37,12 +37,12 @@ def _is_pull(stand: pd.Series, spray_angle: pd.Series) -> pd.Series:
 def _aggregate_batted_ball_stats(raw_df: pd.DataFrame) -> pd.DataFrame:
     batted = raw_df[raw_df["bb_type"].notna()].copy()
 
-    batted["is_fly_ball"] = (batted["bb_type"] == "fly_ball").astype(int)
-    batted["is_hard_hit"] = (batted["launch_speed"] >= HARD_HIT_MIN_EXIT_VELO).astype(int)
+    batted["is_fly_ball"] = (batted["bb_type"] == "fly_ball").fillna(False).astype(int)
+    batted["is_hard_hit"] = (batted["launch_speed"] >= HARD_HIT_MIN_EXIT_VELO).fillna(False).astype(int)
     batted["is_sweet_spot"] = (
         (batted["launch_angle"] >= SWEET_SPOT_MIN_ANGLE)
         & (batted["launch_angle"] <= SWEET_SPOT_MAX_ANGLE)
-    ).astype(int)
+    ).fillna(False).astype(int)
 
     pull_mask = batted["hc_x"].notna() & batted["hc_y"].notna()
     spray_angle = _compute_spray_angle(batted["hc_x"], batted["hc_y"])
@@ -82,7 +82,7 @@ def _aggregate_batter_pitch_type_stats(raw_df: pd.DataFrame) -> pd.DataFrame:
     pa_df = raw_df.loc[pa_mask].copy()
 
     pa_df["pitch_category"] = _classify_pitch_category(pa_df["pitch_type"])
-    pa_df["is_hr"] = (pa_df["events"] == "home_run").astype(int)
+    pa_df["is_hr"] = (pa_df["events"] == "home_run").fillna(False).astype(int)
 
     records = []
     for category in ("fastball", "breaking", "offspeed"):
@@ -156,8 +156,8 @@ def aggregate_pitcher_skill_stats(raw_df: pd.DataFrame) -> pd.DataFrame:
 
 def _aggregate_pitcher_batted_ball(raw_df: pd.DataFrame) -> pd.DataFrame:
     batted = raw_df[raw_df["bb_type"].notna()].copy()
-    batted["is_ground_ball"] = (batted["bb_type"] == "ground_ball").astype(int)
-    batted["is_fly_ball"] = (batted["bb_type"] == "fly_ball").astype(int)
+    batted["is_ground_ball"] = (batted["bb_type"] == "ground_ball").fillna(False).astype(int)
+    batted["is_fly_ball"] = (batted["bb_type"] == "fly_ball").fillna(False).astype(int)
 
     grouped = batted.groupby(["pitcher", "game_pk", "game_date"], sort=False)
 
@@ -174,9 +174,9 @@ def _aggregate_pitcher_pitch_usage(raw_df: pd.DataFrame) -> pd.DataFrame:
 
     classified = classified[classified["pitch_category"].notna()]
 
-    classified["is_fastball"] = (classified["pitch_category"] == "fastball").astype(int)
-    classified["is_breaking"] = (classified["pitch_category"] == "breaking").astype(int)
-    classified["is_offspeed"] = (classified["pitch_category"] == "offspeed").astype(int)
+    classified["is_fastball"] = (classified["pitch_category"] == "fastball").fillna(False).astype(int)
+    classified["is_breaking"] = (classified["pitch_category"] == "breaking").fillna(False).astype(int)
+    classified["is_offspeed"] = (classified["pitch_category"] == "offspeed").fillna(False).astype(int)
 
     grouped = classified.groupby(["pitcher", "game_pk", "game_date"], sort=False)
 
