@@ -1,9 +1,11 @@
+import json
 import logging
 
 import optuna
 import pandas as pd
 
 from config.model_config import (
+    TUNED_PARAMS_PATH,
     TUNING_BRIER_WEIGHT,
     TUNING_CV_FOLDS,
     TUNING_N_TRIALS,
@@ -67,5 +69,10 @@ def run_tuning(
         study.best_value,
         study.best_params,
     )
+
+    TUNED_PARAMS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with open(TUNED_PARAMS_PATH, "w") as f:
+        json.dump(study.best_params, f, indent=2)
+    logger.info("Saved tuned params to %s", TUNED_PARAMS_PATH)
 
     return study.best_params

@@ -4,6 +4,7 @@ import pytest
 import lightgbm as lgb
 
 from src.models.train_model import (
+    ENGINEERED_PREFIXES,
     METADATA_COLUMNS,
     TARGET_COLUMN,
     compute_scale_pos_weight,
@@ -97,6 +98,30 @@ class TestPrepareFeatures:
         assert X["stand"].dtype.name == "category"
         assert X["p_throws"].dtype.name == "category"
         assert X["platoon"].dtype.name == "category"
+
+    def test_excludes_future_leakage_columns(self):
+        df = pd.DataFrame({
+            "batter": [1, 2],
+            "game_pk": [10, 20],
+            "game_date": pd.to_datetime(["2023-06-01", "2023-06-02"]),
+            "pitcher": [100, 200],
+            "home_team": ["NYY", "BOS"],
+            "away_team": ["BOS", "NYY"],
+            "is_hr": [0, 1],
+            "inning": [3, 5],
+            "batter_hr_rate_15g": [0.05, 0.08],
+            "batter_days_until_next_game": [1.0, 2.0],
+            "pitcher_days_until_next_game": [1.0, 3.0],
+            "batter_days_since_prev_game": [2.0, 1.0],
+            "pitcher_days_since_prev_game": [1.0, 2.0],
+        })
+
+        X, _ = prepare_features(df)
+
+        assert "batter_days_until_next_game" not in X.columns
+        assert "pitcher_days_until_next_game" not in X.columns
+        assert "batter_days_since_prev_game" in X.columns
+        assert "pitcher_days_since_prev_game" in X.columns
 
 
 # ---------------------------------------------------------------------------

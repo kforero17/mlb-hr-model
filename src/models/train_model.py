@@ -1,3 +1,4 @@
+import json
 import logging
 from pathlib import Path
 
@@ -16,6 +17,7 @@ from config.model_config import (
     MODEL_PATH,
     MODELS_DIR,
     TRAIN_TEST_SPLIT_DATE,
+    TUNED_PARAMS_PATH,
     VALIDATION_FRACTION,
 )
 from src.models.evaluation import (
@@ -23,6 +25,8 @@ from src.models.evaluation import (
     backtest_betting_strategy,
     compute_bucket_hit_rates,
     compute_daily_precision_recall_at_k,
+    compute_multi_threshold_report,
+    compute_probability_distribution,
     evaluate_game_level_composition,
     evaluate_model,
     fit_calibrator,
@@ -42,8 +46,19 @@ METADATA_COLUMNS: list[str] = [
 
 TARGET_COLUMN: str = "is_hr"
 
-FEATURE_PREFIXES: list[str] = [
-    "batter_", "pitcher_", "games_since_",
+ENGINEERED_PREFIXES: list[str] = [
+    "batter_hr_rate_", "batter_barrel_rate_", "batter_avg_exit_velo_",
+    "batter_avg_launch_angle_", "batter_k_rate_", "batter_bb_rate_",
+    "batter_batting_avg_", "batter_fly_ball_rate_", "batter_pull_rate_",
+    "batter_hard_hit_rate_", "batter_sweet_spot_", "batter_avg_xslg_",
+    "batter_avg_xwoba_", "batter_hr_rate_vs_", "batter_hr_streak_",
+    "pitcher_hr_allowed_rate_", "pitcher_barrel_rate_against_",
+    "pitcher_avg_exit_velo_against_", "pitcher_k_rate_",
+    "pitcher_bb_rate_", "pitcher_whip_proxy_",
+    "pitcher_gb_rate_", "pitcher_fb_rate_",
+    "pitcher_fastball_pct_", "pitcher_breaking_pct_",
+    "pitcher_offspeed_pct_",
+    "games_since_last_hr",
 ]
 
 FEATURE_COLUMNS: list[str] = [
@@ -57,6 +72,7 @@ FEATURE_COLUMNS: list[str] = [
     "wind_out_to_cf", "air_density_index",
     "batting_order_pos", "batting_order_avg",
     "team_runs_per_game", "expected_pas",
+    "batter_days_since_prev_game", "pitcher_days_since_prev_game",
 ]
 
 
@@ -107,7 +123,7 @@ def _select_feature_columns(df: pd.DataFrame) -> list[str]:
     for col in df.columns:
         if col in FEATURE_COLUMNS:
             feature_cols.append(col)
-        elif any(col.startswith(p) for p in FEATURE_PREFIXES):
+        elif any(col.startswith(p) for p in ENGINEERED_PREFIXES):
             feature_cols.append(col)
     return feature_cols
 
@@ -188,6 +204,16 @@ def save_model(model: lgb.Booster, path: Path | None = None) -> None:
 def load_model(path: Path | None = None) -> lgb.Booster:
     path = path or MODEL_PATH
     return joblib.load(path)
+
+
+def load_tuned_params() -> dict | None:
+    if not TUNED_PARAMS_PATH.exists():
+        logger.info("No tuned params found at %s — using defaults", TUNED_PARAMS_PATH)
+        return None
+    with open(TUNED_PARAMS_PATH) as f:
+        params = json.load(f)
+    logger.info("Loaded tuned params from %s: %s", TUNED_PARAMS_PATH, params)
+    return params
 
 
 def run_walk_forward_cv(
@@ -271,7 +297,9 @@ def main() -> None:
 
     df = load_feature_matrix()
 
-    cv_result = run_walk_forward_cv(df)
+    tuned_params = load_tuned_params()
+
+    cv_result = run_walk_forward_cv(df, params_override=tuned_params)
 
     train, val, test = time_based_split(df)
 
@@ -281,7 +309,7 @@ def main() -> None:
 
     logger.info("Feature count: %d", X_train.shape[1])
 
-    model = train_lightgbm(X_train, y_train, X_val, y_val)
+    model = train_lightgbm(X_train, y_train, X_val, y_val, params_override=tuned_params)
 
     y_pred_proba = model.predict(X_test)
 
@@ -308,6 +336,10 @@ def main() -> None:
 
     game_metrics_calibrated = evaluate_game_level_composition(test, y_pred_calibrated)
     logger.info("Game-level test metrics (calibrated): %s", game_metrics_calibrated)
+
+    prob_dist_raw = compute_probability_distribution(y_pred_proba)
+    prob_dist_calibrated = compute_probability_distribution(y_pred_calibrated)
+    multi_threshold_df = compute_multi_threshold_report(y_test.values, y_pred_calibrated)
 
     game_dates_test = test["game_date"].values
 
@@ -336,6 +368,9 @@ def main() -> None:
         game_dates=game_dates_test,
         cv_summary=cv_result.summary,
         cv_fold_metrics=cv_result.fold_metrics,
+        multi_threshold_df=multi_threshold_df,
+        prob_dist_raw=prob_dist_raw,
+        prob_dist_calibrated=prob_dist_calibrated,
     )
 
     save_model(model)

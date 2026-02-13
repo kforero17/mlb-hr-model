@@ -42,3 +42,4 @@ CATEGORICAL_FEATURES: list[str] = ["stand", "p_throws", "platoon", "inning", "ro
 MODELS_DIR = Path("data/models")
 EVALUATION_DIR = MODELS_DIR / "evaluation"
 MODEL_PATH = MODELS_DIR / "lgbm_hr_model.joblib"
+TUNED_PARAMS_PATH = MODELS_DIR / "tuned_params.json"

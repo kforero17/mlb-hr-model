@@ -3,8 +3,11 @@ import pandas as pd
 import pytest
 
 from src.models.evaluation import (
+    compute_multi_threshold_report,
+    compute_probability_distribution,
     evaluate_game_level_composition,
     evaluate_model,
+    find_f1_optimal_threshold,
     plot_feature_importance,
     plot_precision_recall_curve,
     save_evaluation_report,
@@ -25,7 +28,7 @@ class TestEvaluateModel:
 
         expected_keys = {"pr_auc", "roc_auc", "precision", "recall", "f1",
                          "n_positive", "n_total", "positive_rate",
-                         "brier_score", "log_loss"}
+                         "brier_score", "log_loss", "baseline_brier", "threshold"}
         assert set(metrics.keys()) == expected_keys
 
     def test_metric_values_in_valid_ranges(self):
@@ -50,6 +53,54 @@ class TestEvaluateModel:
 
         assert metrics["roc_auc"] == pytest.approx(1.0)
         assert metrics["pr_auc"] == pytest.approx(1.0)
+
+
+# ---------------------------------------------------------------------------
+# find_f1_optimal_threshold
+# ---------------------------------------------------------------------------
+
+class TestFindF1OptimalThreshold:
+
+    def test_returns_threshold_between_zero_and_one(self):
+        y_true = np.array([0, 0, 0, 0, 0, 0, 0, 1, 1, 1])
+        y_pred_proba = np.array([0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.10])
+
+        threshold = find_f1_optimal_threshold(y_true, y_pred_proba)
+
+        assert 0.0 < threshold < 1.0
+
+
+# ---------------------------------------------------------------------------
+# compute_multi_threshold_report
+# ---------------------------------------------------------------------------
+
+class TestComputeMultiThresholdReport:
+
+    def test_returns_dataframe_with_expected_columns(self):
+        y_true = np.array([0, 0, 0, 1, 0, 0, 0, 1, 0, 0])
+        y_pred_proba = np.array([0.01, 0.02, 0.015, 0.08, 0.03, 0.01, 0.02, 0.06, 0.04, 0.01])
+
+        report = compute_multi_threshold_report(y_true, y_pred_proba)
+
+        assert isinstance(report, pd.DataFrame)
+        assert set(report.columns) == {"threshold", "precision", "recall", "f1", "n_predicted"}
+        assert len(report) == 5
+
+
+# ---------------------------------------------------------------------------
+# compute_probability_distribution
+# ---------------------------------------------------------------------------
+
+class TestComputeProbabilityDistribution:
+
+    def test_returns_dict_with_expected_keys(self):
+        y_pred = np.array([0.01, 0.02, 0.03, 0.04, 0.05])
+
+        dist = compute_probability_distribution(y_pred)
+
+        assert set(dist.keys()) == {"min", "p5", "p25", "median", "p75", "p95", "p99", "max"}
+        assert dist["min"] == pytest.approx(0.01)
+        assert dist["max"] == pytest.approx(0.05)
 
 
 # ---------------------------------------------------------------------------
@@ -105,7 +156,7 @@ class TestEvaluateGameLevelComposition:
 
         expected_keys = {"pr_auc", "roc_auc", "precision", "recall", "f1",
                          "n_positive", "n_total", "positive_rate",
-                         "brier_score", "log_loss"}
+                         "brier_score", "log_loss", "baseline_brier", "threshold"}
         assert set(result.keys()) == expected_keys
 
         df_check = test_df.copy()

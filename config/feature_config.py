@@ -1,6 +1,6 @@
 from pathlib import Path
 
-ROLLING_WINDOWS: list[int] = [15, 50]
+ROLLING_WINDOWS: list[int] = [15, 50, 162]
 
 MIN_GAMES_FOR_ROLLING: int = 5
 MIN_PA_PER_GAME: int = 1

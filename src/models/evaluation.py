@@ -25,11 +25,24 @@ from config.model_config import EVALUATION_DIR, TOP_N_FEATURES
 logger = logging.getLogger(__name__)
 
 
+def find_f1_optimal_threshold(
+    y_true: np.ndarray,
+    y_pred_proba: np.ndarray,
+) -> float:
+    precisions, recalls, thresholds = precision_recall_curve(y_true, y_pred_proba)
+    denom = precisions[:-1] + recalls[:-1]
+    denom = np.where(denom == 0, 1.0, denom)
+    f1_scores = 2 * precisions[:-1] * recalls[:-1] / denom
+    return float(thresholds[np.argmax(f1_scores)])
+
+
 def evaluate_model(
     y_true: np.ndarray,
     y_pred_proba: np.ndarray,
-    threshold: float = 0.5,
+    threshold: float | None = None,
 ) -> dict:
+    if threshold is None:
+        threshold = find_f1_optimal_threshold(y_true, y_pred_proba)
     y_pred = (y_pred_proba >= threshold).astype(int)
 
     pr_auc = average_precision_score(y_true, y_pred_proba)
@@ -54,26 +67,59 @@ def evaluate_model(
         "n_positive": n_positive,
         "n_total": n_total,
         "positive_rate": positive_rate,
+        "baseline_brier": positive_rate * (1 - positive_rate),
+        "threshold": threshold,
     }
 
     logger.info(
         "Model evaluation — PR-AUC: %.4f | ROC-AUC: %.4f | "
         "Precision: %.4f | Recall: %.4f | F1: %.4f | "
-        "Brier: %.6f | Log Loss: %.4f | "
-        "Positive rate: %d/%d (%.2f%%)",
-        pr_auc,
-        roc_auc,
-        precision,
-        recall,
-        f1,
-        brier,
-        logloss,
-        n_positive,
-        n_total,
-        positive_rate * 100,
+        "Brier: %.6f (baseline: %.6f) | Log Loss: %.4f | "
+        "Threshold: %.4f | Positive rate: %d/%d (%.2f%%)",
+        pr_auc, roc_auc, precision, recall, f1,
+        brier, positive_rate * (1 - positive_rate), logloss,
+        threshold, n_positive, n_total, positive_rate * 100,
     )
 
     return metrics
+
+
+def compute_multi_threshold_report(
+    y_true: np.ndarray,
+    y_pred_proba: np.ndarray,
+    thresholds: list[float] | None = None,
+) -> pd.DataFrame:
+    if thresholds is None:
+        thresholds = [0.02, 0.03, 0.04, 0.05, 0.06]
+
+    rows: list[dict] = []
+    for t in thresholds:
+        y_pred = (y_pred_proba >= t).astype(int)
+        n_predicted = int(y_pred.sum())
+        rows.append({
+            "threshold": t,
+            "precision": precision_score(y_true, y_pred, zero_division=0),
+            "recall": recall_score(y_true, y_pred, zero_division=0),
+            "f1": f1_score(y_true, y_pred, zero_division=0),
+            "n_predicted": n_predicted,
+        })
+
+    report = pd.DataFrame(rows)
+    logger.info("Multi-threshold report:\n%s", report.to_string(index=False))
+    return report
+
+
+def compute_probability_distribution(y_pred_proba: np.ndarray) -> dict:
+    return {
+        "min": float(np.min(y_pred_proba)),
+        "p5": float(np.percentile(y_pred_proba, 5)),
+        "p25": float(np.percentile(y_pred_proba, 25)),
+        "median": float(np.median(y_pred_proba)),
+        "p75": float(np.percentile(y_pred_proba, 75)),
+        "p95": float(np.percentile(y_pred_proba, 95)),
+        "p99": float(np.percentile(y_pred_proba, 99)),
+        "max": float(np.max(y_pred_proba)),
+    }
 
 
 def plot_precision_recall_curve(
@@ -467,8 +513,10 @@ def _format_metrics_block(m: dict, title: str) -> list[str]:
     lines.append(f"  Precision:     {m.get('precision', 0):.4f}")
     lines.append(f"  Recall:        {m.get('recall', 0):.4f}")
     lines.append(f"  F1 Score:      {m.get('f1', 0):.4f}")
-    lines.append(f"  Brier Score:   {m.get('brier_score', 0):.6f}")
+    lines.append(f"  Brier Score:   {m.get('brier_score', 0):.6f} "
+                 f"(baseline: {m.get('baseline_brier', 0):.6f})")
     lines.append(f"  Log Loss:      {m.get('log_loss', 0):.4f}")
+    lines.append(f"  Threshold:     {m.get('threshold', 0):.4f}")
     lines.append(f"  Positive rate: {m.get('n_positive', 0)}/{m.get('n_total', 0)} "
                  f"({m.get('positive_rate', 0) * 100:.2f}%)")
     lines.append("")
@@ -557,6 +605,9 @@ def save_evaluation_report(
     betting_metrics: dict | None = None,
     bucket_df: pd.DataFrame | None = None,
     game_dates: np.ndarray | None = None,
+    multi_threshold_df: pd.DataFrame | None = None,
+    prob_dist_raw: dict | None = None,
+    prob_dist_calibrated: dict | None = None,
     cv_summary: dict | None = None,
     cv_fold_metrics: list[dict] | None = None,
     output_dir: Path | None = None,
@@ -586,6 +637,26 @@ def save_evaluation_report(
 
     if cv_summary is not None and cv_summary.get("n_folds", 0) > 0:
         lines.extend(_format_cv_summary_block(cv_summary, cv_fold_metrics))
+
+    if prob_dist_raw is not None:
+        lines.append("Probability Distribution (Raw)")
+        lines.append("-" * 40)
+        for k, v in prob_dist_raw.items():
+            lines.append(f"  {k:<8s} {v:.6f}")
+        lines.append("")
+
+    if prob_dist_calibrated is not None:
+        lines.append("Probability Distribution (Calibrated)")
+        lines.append("-" * 40)
+        for k, v in prob_dist_calibrated.items():
+            lines.append(f"  {k:<8s} {v:.6f}")
+        lines.append("")
+
+    if multi_threshold_df is not None:
+        lines.append("Multi-Threshold Precision/Recall")
+        lines.append("-" * 40)
+        lines.append(multi_threshold_df.to_string(index=False))
+        lines.append("")
 
     lines.append(f"Top {TOP_N_FEATURES} Features by Importance")
     lines.append("-" * 40)
