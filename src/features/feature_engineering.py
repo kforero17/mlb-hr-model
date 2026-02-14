@@ -77,13 +77,13 @@ def _compute_hr_streak(series: pd.Series, window: int) -> pd.Series:
     )
 
 
-def _compute_games_since_last_hr(hr_series: pd.Series) -> pd.Series:
-    had_hr = hr_series > 0
-    hr_groups = had_hr.cumsum()
-    games_since = hr_groups.groupby(hr_groups).cumcount()
+def _compute_games_since_last_event(event_series: pd.Series) -> pd.Series:
+    had_event = event_series > 0
+    event_groups = had_event.cumsum()
+    games_since = event_groups.groupby(event_groups).cumcount()
     result = games_since.shift(1)
-    before_first_hr = hr_groups.shift(1, fill_value=0) == 0
-    result[before_first_hr] = np.nan
+    before_first = event_groups.shift(1, fill_value=0) == 0
+    result[before_first] = np.nan
     return result
 
 
@@ -176,12 +176,29 @@ def compute_batter_rolling_stats(
     df = compute_rolling_rates(df, "batter", rate_columns, windows, "batter")
 
     for w in windows:
+        df[f"batter_pa_count_{w}g"] = df.groupby("batter")["n_pa"].transform(
+            lambda s: s.rolling(window=w, min_periods=MIN_GAMES_FOR_ROLLING)
+            .sum()
+            .shift(1)
+        )
+
+    for w in windows:
         df[f"batter_hr_streak_{w}g"] = df.groupby("batter")["hit_hr"].transform(
             lambda s: _compute_hr_streak(s, w)
         )
 
     df["games_since_last_hr"] = df.groupby("batter")["hit_hr"].transform(
-        _compute_games_since_last_hr
+        _compute_games_since_last_event
+    )
+
+    df["hit_k"] = (df["n_k"] > 0).astype(int)
+    for w in windows:
+        df[f"batter_k_streak_{w}g"] = df.groupby("batter")["n_k"].transform(
+            lambda s: s.rolling(window=w, min_periods=1).sum().shift(1)
+        )
+
+    df["games_since_last_k"] = df.groupby("batter")["hit_k"].transform(
+        _compute_games_since_last_event
     )
 
     logger.info("Batter rolling stats complete")
@@ -250,6 +267,13 @@ def _apply_pitcher_rolling(
     df["_whip_num"] = df["n_hits_against"] + df["n_bb_against"]
 
     df = compute_rolling_rates(df, "pitcher", rate_columns, windows, "pitcher")
+
+    for w in windows:
+        df[f"pitcher_bf_count_{w}g"] = df.groupby("pitcher")["n_batters_faced"].transform(
+            lambda s: s.rolling(window=w, min_periods=MIN_GAMES_FOR_ROLLING)
+            .sum()
+            .shift(1)
+        )
 
     if "_whip_num" in df.columns:
         df.drop(columns=["_whip_num"], inplace=True)
@@ -324,7 +348,7 @@ def merge_rolling_stats_onto_pas(
 ) -> pd.DataFrame:
     batter_stat_cols = [
         c for c in batter_rolling_df.columns
-        if c.startswith("batter_") or c == "games_since_last_hr"
+        if c.startswith("batter_") or c.startswith("games_since_last_")
     ]
     batter_merge_cols = ["batter", "game_pk", "game_date"] + batter_stat_cols
     batter_subset = batter_rolling_df[

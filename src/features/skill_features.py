@@ -82,19 +82,19 @@ def _aggregate_batter_pitch_type_stats(raw_df: pd.DataFrame) -> pd.DataFrame:
     pa_df = raw_df.loc[pa_mask].copy()
 
     pa_df["pitch_category"] = _classify_pitch_category(pa_df["pitch_type"])
-    pa_df["is_hr"] = (pa_df["events"] == "home_run").fillna(False).astype(int)
+    pa_df["is_k"] = pa_df["events"].str.startswith("strikeout").fillna(False).astype(int)
 
     records = []
     for category in ("fastball", "breaking", "offspeed"):
         subset = pa_df[pa_df["pitch_category"] == category]
         grouped = subset.groupby(["batter", "game_pk", "game_date"], sort=False)
         cat_agg = grouped.agg(
-            n_pa=(f"is_hr", "size"),
-            n_hr=(f"is_hr", "sum"),
+            n_pa=("is_k", "size"),
+            n_k=("is_k", "sum"),
         ).reset_index()
         cat_agg = cat_agg.rename(columns={
             "n_pa": f"n_pa_vs_{category}",
-            "n_hr": f"n_hr_vs_{category}",
+            "n_k": f"n_k_vs_{category}",
         })
         records.append(cat_agg)
 
@@ -208,9 +208,9 @@ def compute_batter_skill_rolling(
         "sweet_spot_pct": ("n_sweet_spot", "n_batted_ball"),
         "avg_xslg": "avg_xslg",
         "avg_xwoba": "avg_xwoba",
-        "hr_rate_vs_fastball": ("n_hr_vs_fastball", "n_pa_vs_fastball"),
-        "hr_rate_vs_breaking": ("n_hr_vs_breaking", "n_pa_vs_breaking"),
-        "hr_rate_vs_offspeed": ("n_hr_vs_offspeed", "n_pa_vs_offspeed"),
+        "k_rate_vs_fastball": ("n_k_vs_fastball", "n_pa_vs_fastball"),
+        "k_rate_vs_breaking": ("n_k_vs_breaking", "n_pa_vs_breaking"),
+        "k_rate_vs_offspeed": ("n_k_vs_offspeed", "n_pa_vs_offspeed"),
     }
 
     df = compute_rolling_rates(df, "batter", rate_columns, windows, "batter")

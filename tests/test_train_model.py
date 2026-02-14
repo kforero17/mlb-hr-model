@@ -27,7 +27,7 @@ class TestTimeBasedSplit:
         return pd.DataFrame({
             "game_date": dates,
             "batter": range(len(dates)),
-            "is_hr": np.random.default_rng(42).integers(0, 2, len(dates)),
+            "is_k": np.random.default_rng(42).integers(0, 2, len(dates)),
         })
 
     def test_train_dates_before_split_and_test_dates_after(self, date_range_df):
@@ -66,7 +66,7 @@ class TestPrepareFeatures:
             "pitcher": [100, 200],
             "home_team": ["NYY", "BOS"],
             "away_team": ["BOS", "NYY"],
-            "is_hr": [0, 1],
+            "is_k": [0, 1],
             "launch_speed": [100.0, 95.0],
             "inning": [3, 5],
             "score_diff": [1.0, -2.0],
@@ -89,7 +89,7 @@ class TestPrepareFeatures:
             "batter": [1], "game_pk": [10],
             "game_date": pd.to_datetime(["2023-06-01"]),
             "pitcher": [100], "home_team": ["NYY"], "away_team": ["BOS"],
-            "is_hr": [0],
+            "is_k": [0],
             "stand": ["R"], "p_throws": ["L"], "platoon": ["R_vs_L"],
             "inning": [3],
         })
@@ -108,7 +108,7 @@ class TestPrepareFeatures:
             "pitcher": [100, 200],
             "home_team": ["NYY", "BOS"],
             "away_team": ["BOS", "NYY"],
-            "is_hr": [0, 1],
+            "is_k": [0, 1],
             "inning": [3, 5],
             "batter_hr_rate_15g": [0.05, 0.08],
             "batter_days_until_next_game": [1.0, 2.0],
@@ -185,3 +185,40 @@ class TestSelectFeatureColumnsInteraction:
         assert "ix_platoon_x_hr_rate" in selected
         assert "inning" in selected
         assert "some_other_col" not in selected
+
+    def test_pregame_mode_excludes_in_game_features(self):
+        df = pd.DataFrame({
+            "inning": [3],
+            "outs_when_up": [1],
+            "score_diff": [2.0],
+            "runners_on_base": [1],
+            "pa_number_in_game": [2],
+            "is_home": [1],
+            "month": [6],
+            "batter_k_rate_50g": [0.22],
+            "ix_whiff_x_swstr": [0.05],
+        })
+
+        selected = _select_feature_columns(df, pregame=True)
+
+        assert "inning" not in selected
+        assert "outs_when_up" not in selected
+        assert "score_diff" not in selected
+        assert "runners_on_base" not in selected
+        assert "pa_number_in_game" not in selected
+        assert "is_home" in selected
+        assert "month" in selected
+        assert "batter_k_rate_50g" in selected
+        assert "ix_whiff_x_swstr" in selected
+
+    def test_selects_pa_count_and_bf_count_features(self):
+        df = pd.DataFrame({
+            "batter_pa_count_50g": [150.0],
+            "pitcher_bf_count_50g": [200.0],
+            "batter_k_rate_50g": [0.22],
+        })
+
+        selected = _select_feature_columns(df)
+
+        assert "batter_pa_count_50g" in selected
+        assert "pitcher_bf_count_50g" in selected

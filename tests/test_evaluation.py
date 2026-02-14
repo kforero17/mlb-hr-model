@@ -80,13 +80,13 @@ class TestComputeMultiThresholdReport:
 
     def test_returns_dataframe_with_expected_columns(self):
         y_true = np.array([0, 0, 0, 1, 0, 0, 0, 1, 0, 0])
-        y_pred_proba = np.array([0.01, 0.02, 0.015, 0.08, 0.03, 0.01, 0.02, 0.06, 0.04, 0.01])
+        y_pred_proba = np.array([0.05, 0.10, 0.15, 0.35, 0.20, 0.08, 0.12, 0.30, 0.25, 0.03])
 
         report = compute_multi_threshold_report(y_true, y_pred_proba)
 
         assert isinstance(report, pd.DataFrame)
         assert set(report.columns) == {"threshold", "precision", "recall", "f1", "n_predicted"}
-        assert len(report) == 5
+        assert len(report) == 7
 
 
 # ---------------------------------------------------------------------------
@@ -150,7 +150,7 @@ class TestEvaluateGameLevelComposition:
             "batter": [100, 100, 200, 200],
             "game_pk": [1, 1, 1, 1],
             "game_date": pd.to_datetime(["2023-06-01"] * 4),
-            "is_hr": [1, 0, 0, 0],
+            "is_k": [1, 0, 0, 0],
         })
         pa_pred_proba = np.array([0.4, 0.3, 0.1, 0.1])
 
@@ -164,10 +164,10 @@ class TestEvaluateGameLevelComposition:
         df_check = test_df.copy()
         df_check["pred_proba"] = pa_pred_proba
         game_df = df_check.groupby(["batter", "game_pk", "game_date"]).agg(
-            actual_hr=("is_hr", "max"),
+            actual_k=("is_k", "max"),
         ).reset_index()
-        assert game_df.loc[game_df["batter"] == 100, "actual_hr"].iloc[0] == 1
-        assert game_df.loc[game_df["batter"] == 200, "actual_hr"].iloc[0] == 0
+        assert game_df.loc[game_df["batter"] == 100, "actual_k"].iloc[0] == 1
+        assert game_df.loc[game_df["batter"] == 200, "actual_k"].iloc[0] == 0
 
 
 # ---------------------------------------------------------------------------

@@ -93,11 +93,11 @@ class TestAggregateBatterSkillStats:
         assert lhb_pull == 1
         assert center == 0
 
-    def test_pitch_type_pa_hr_counts(self):
+    def test_pitch_type_pa_k_counts(self):
         rows = [
-            _make_raw_pitch_row(events="home_run", pitch_type="FF", bb_type="fly_ball"),
+            _make_raw_pitch_row(events="strikeout", pitch_type="FF", bb_type="fly_ball"),
             _make_raw_pitch_row(events="single", pitch_type="FF", bb_type="line_drive"),
-            _make_raw_pitch_row(events="home_run", pitch_type="SL", bb_type="fly_ball"),
+            _make_raw_pitch_row(events="strikeout", pitch_type="SL", bb_type="fly_ball"),
             _make_raw_pitch_row(events="field_out", pitch_type="CH", bb_type="ground_ball"),
         ]
         raw_df = pd.DataFrame(rows)
@@ -106,11 +106,11 @@ class TestAggregateBatterSkillStats:
 
         row = result.iloc[0]
         assert row["n_pa_vs_fastball"] == 2
-        assert row["n_hr_vs_fastball"] == 1
+        assert row["n_k_vs_fastball"] == 1
         assert row["n_pa_vs_breaking"] == 1
-        assert row["n_hr_vs_breaking"] == 1
+        assert row["n_k_vs_breaking"] == 1
         assert row["n_pa_vs_offspeed"] == 1
-        assert row["n_hr_vs_offspeed"] == 0
+        assert row["n_k_vs_offspeed"] == 0
 
 
 class TestAggregatePitcherSkillStats:
@@ -166,11 +166,11 @@ class TestComputeSkillRolling:
             "n_sweet_spot": [1] * 8,
             "avg_xslg": [0.5] * 8,
             "avg_xwoba": [0.4] * 8,
-            "n_hr_vs_fastball": [1] * 8,
+            "n_k_vs_fastball": [1] * 8,
             "n_pa_vs_fastball": [3] * 8,
-            "n_hr_vs_breaking": [0] * 8,
+            "n_k_vs_breaking": [0] * 8,
             "n_pa_vs_breaking": [2] * 8,
-            "n_hr_vs_offspeed": [0] * 8,
+            "n_k_vs_offspeed": [0] * 8,
             "n_pa_vs_offspeed": [1] * 8,
         })
 
@@ -183,9 +183,9 @@ class TestComputeSkillRolling:
             "batter_sweet_spot_pct_5g",
             "batter_avg_xslg_5g",
             "batter_avg_xwoba_5g",
-            "batter_hr_rate_vs_fastball_5g",
-            "batter_hr_rate_vs_breaking_5g",
-            "batter_hr_rate_vs_offspeed_5g",
+            "batter_k_rate_vs_fastball_5g",
+            "batter_k_rate_vs_breaking_5g",
+            "batter_k_rate_vs_offspeed_5g",
         ]
         for col in expected_cols:
             assert col in result.columns, f"Missing column: {col}"
@@ -225,7 +225,7 @@ class TestMergeSkillFeaturesOntoPas:
         for feat in [
             "fly_ball_rate", "pull_rate", "hard_hit_rate", "sweet_spot_pct",
             "avg_xslg", "avg_xwoba",
-            "hr_rate_vs_fastball", "hr_rate_vs_breaking", "hr_rate_vs_offspeed",
+            "k_rate_vs_fastball", "k_rate_vs_breaking", "k_rate_vs_offspeed",
         ]:
             for w in [15, 50]:
                 batter_cols[f"batter_{feat}_{w}g"] = [0.5]

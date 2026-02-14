@@ -7,7 +7,7 @@ import lightgbm as lgb
 import numpy as np
 import pandas as pd
 
-from config.feature_config import FEATURE_MATRIX_PATH
+from config.feature_config import FEATURE_MATRIX_PATH, IN_GAME_FEATURES
 from config.model_config import (
     CALIBRATION_METHOD,
     CATEGORICAL_FEATURES,
@@ -17,6 +17,8 @@ from config.model_config import (
     MAX_BOOST_ROUNDS,
     MODEL_PATH,
     MODELS_DIR,
+    PREGAME_CATEGORICAL_FEATURES,
+    PREGAME_MODE,
     TRAIN_TEST_SPLIT_DATE,
     TUNED_PARAMS_PATH,
     VALIDATION_FRACTION,
@@ -47,21 +49,27 @@ METADATA_COLUMNS: list[str] = [
     "batter", "game_pk", "game_date", "pitcher", "home_team", "away_team",
 ]
 
-TARGET_COLUMN: str = "is_hr"
+TARGET_COLUMN: str = "is_k"
 
 ENGINEERED_PREFIXES: list[str] = [
     "batter_hr_rate_", "batter_barrel_rate_", "batter_avg_exit_velo_",
     "batter_avg_launch_angle_", "batter_k_rate_", "batter_bb_rate_",
     "batter_batting_avg_", "batter_fly_ball_rate_", "batter_pull_rate_",
     "batter_hard_hit_rate_", "batter_sweet_spot_", "batter_avg_xslg_",
-    "batter_avg_xwoba_", "batter_hr_rate_vs_", "batter_hr_streak_",
+    "batter_avg_xwoba_", "batter_k_rate_vs_", "batter_k_streak_",
+    "batter_swing_rate_", "batter_whiff_rate_", "batter_chase_rate_",
+    "batter_zone_contact_rate_", "batter_called_strike_rate_",
     "pitcher_hr_allowed_rate_", "pitcher_barrel_rate_against_",
     "pitcher_avg_exit_velo_against_", "pitcher_k_rate_",
     "pitcher_bb_rate_", "pitcher_whip_proxy_",
     "pitcher_gb_rate_", "pitcher_fb_rate_",
     "pitcher_fastball_pct_", "pitcher_breaking_pct_",
     "pitcher_offspeed_pct_",
+    "pitcher_avg_fastball_velo_", "pitcher_swstr_rate_",
+    "pitcher_chase_rate_induced_", "pitcher_zone_rate_",
+    "batter_pa_count_", "pitcher_bf_count_",
     "games_since_last_hr",
+    "games_since_last_k",
     "ix_",
 ]
 
@@ -71,6 +79,7 @@ FEATURE_COLUMNS: list[str] = [
     "month", "day_of_week",
     "stand", "p_throws", "platoon", "platoon_advantage",
     "park_hr_factor", "park_hr_factor_handedness",
+    "park_k_factor", "park_k_factor_handedness",
     "elevation_ft", "roof_type",
     "temp_f", "wind_speed_mph", "wind_dir_deg", "humidity_pct",
     "wind_out_to_cf", "air_density_index",
@@ -83,13 +92,13 @@ FEATURE_COLUMNS: list[str] = [
 def load_feature_matrix() -> pd.DataFrame:
     df = pd.read_parquet(FEATURE_MATRIX_PATH)
     df["game_date"] = pd.to_datetime(df["game_date"])
-    hr_rate = df[TARGET_COLUMN].mean()
+    target_rate = df[TARGET_COLUMN].mean()
     logger.info(
         "Loaded feature matrix: %d rows x %d columns | "
-        "dates %s to %s | HR rate: %.4f",
+        "dates %s to %s | %s rate: %.4f",
         df.shape[0], df.shape[1],
         df["game_date"].min().date(), df["game_date"].max().date(),
-        hr_rate,
+        TARGET_COLUMN, target_rate,
     )
     return df
 
@@ -122,9 +131,12 @@ def time_based_split(
     return train, val, test
 
 
-def _select_feature_columns(df: pd.DataFrame) -> list[str]:
+def _select_feature_columns(df: pd.DataFrame, pregame: bool = False) -> list[str]:
+    excluded = set(IN_GAME_FEATURES) if pregame else set()
     feature_cols: list[str] = []
     for col in df.columns:
+        if col in excluded:
+            continue
         if col in FEATURE_COLUMNS:
             feature_cols.append(col)
         elif any(col.startswith(p) for p in ENGINEERED_PREFIXES):
@@ -132,12 +144,16 @@ def _select_feature_columns(df: pd.DataFrame) -> list[str]:
     return feature_cols
 
 
-def prepare_features(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.Series]:
-    feature_cols = _select_feature_columns(df)
+def prepare_features(
+    df: pd.DataFrame,
+    pregame: bool = False,
+) -> tuple[pd.DataFrame, pd.Series]:
+    feature_cols = _select_feature_columns(df, pregame=pregame)
     X = df[feature_cols].copy()
     y = df[TARGET_COLUMN].copy()
 
-    for col in CATEGORICAL_FEATURES:
+    cat_features = PREGAME_CATEGORICAL_FEATURES if pregame else CATEGORICAL_FEATURES
+    for col in cat_features:
         if col in X.columns:
             X[col] = X[col].astype("category")
 
@@ -161,9 +177,11 @@ def train_lightgbm(
     y_val: pd.Series,
     categorical_features: list[str] | None = None,
     params_override: dict | None = None,
+    pregame: bool = False,
 ) -> lgb.Booster:
     if categorical_features is None:
-        categorical_features = [c for c in CATEGORICAL_FEATURES if c in X_train.columns]
+        cat_list = PREGAME_CATEGORICAL_FEATURES if pregame else CATEGORICAL_FEATURES
+        categorical_features = [c for c in cat_list if c in X_train.columns]
 
     train_ds = lgb.Dataset(
         X_train, label=y_train, categorical_feature=categorical_features,
@@ -224,6 +242,7 @@ def run_walk_forward_cv(
     df: pd.DataFrame,
     params_override: dict | None = None,
     max_folds: int | None = None,
+    pregame: bool = False,
 ) -> WalkForwardResult:
     holdout_ts = pd.Timestamp(HOLDOUT_DATE)
     pre_holdout = df[df["game_date"] < holdout_ts].copy()
@@ -259,9 +278,9 @@ def run_walk_forward_cv(
         es_train = fold_train.iloc[:-es_size]
         es_val = fold_train.iloc[-es_size:]
 
-        X_train, y_train = prepare_features(es_train)
-        X_es_val, y_es_val = prepare_features(es_val)
-        X_val, y_val = prepare_features(fold_val)
+        X_train, y_train = prepare_features(es_train, pregame=pregame)
+        X_es_val, y_es_val = prepare_features(es_val, pregame=pregame)
+        X_val, y_val = prepare_features(fold_val, pregame=pregame)
 
         logger.info(
             "Fold %d: train=%d (es_val=%d) | val=%d | %s to %s",
@@ -269,7 +288,10 @@ def run_walk_forward_cv(
             fold.val_start.date(), fold.val_end.date(),
         )
 
-        model = train_lightgbm(X_train, y_train, X_es_val, y_es_val, params_override=params_override)
+        model = train_lightgbm(
+            X_train, y_train, X_es_val, y_es_val,
+            params_override=params_override, pregame=pregame,
+        )
         y_pred_raw = model.predict(X_val)
         spw = model.params.get("scale_pos_weight", 1.0)
         y_pred = correct_scale_pos_weight(y_pred_raw, spw)
@@ -299,23 +321,29 @@ def run_walk_forward_cv(
 
 
 def main() -> None:
-    logger.info("Starting model training pipeline")
+    mode_label = "pre-game" if PREGAME_MODE else "full (PA-level)"
+    logger.info("Starting model training pipeline — mode: %s", mode_label)
 
     df = load_feature_matrix()
 
     tuned_params = load_tuned_params()
 
-    cv_result = run_walk_forward_cv(df, params_override=tuned_params)
+    cv_result = run_walk_forward_cv(
+        df, params_override=tuned_params, pregame=PREGAME_MODE,
+    )
 
     train, val, test = time_based_split(df)
 
-    X_train, y_train = prepare_features(train)
-    X_val, y_val = prepare_features(val)
-    X_test, y_test = prepare_features(test)
+    X_train, y_train = prepare_features(train, pregame=PREGAME_MODE)
+    X_val, y_val = prepare_features(val, pregame=PREGAME_MODE)
+    X_test, y_test = prepare_features(test, pregame=PREGAME_MODE)
 
     logger.info("Feature count: %d", X_train.shape[1])
 
-    model = train_lightgbm(X_train, y_train, X_val, y_val, params_override=tuned_params)
+    model = train_lightgbm(
+        X_train, y_train, X_val, y_val,
+        params_override=tuned_params, pregame=PREGAME_MODE,
+    )
 
     y_pred_proba = model.predict(X_test)
     spw = model.params.get("scale_pos_weight", 1.0)
@@ -349,8 +377,8 @@ def main() -> None:
     game_metrics = evaluate_game_level_composition(test, y_pred_proba)
     logger.info("Game-level test metrics (raw): %s", game_metrics)
 
-    game_metrics_calibrated = evaluate_game_level_composition(test, y_pred_calibrated)
-    logger.info("Game-level test metrics (calibrated): %s", game_metrics_calibrated)
+    game_metrics_corrected = evaluate_game_level_composition(test, y_pred_corrected)
+    logger.info("Game-level test metrics (corrected): %s", game_metrics_corrected)
 
     prob_dist_raw = compute_probability_distribution(y_pred_proba)
     prob_dist_corrected = compute_probability_distribution(y_pred_corrected)
@@ -359,22 +387,22 @@ def main() -> None:
     logger.info("Probability distribution (corrected): %s", prob_dist_corrected)
     logger.info("Probability distribution (calibrated): %s", prob_dist_calibrated)
 
-    multi_threshold_df = compute_multi_threshold_report(y_test.values, y_pred_calibrated)
+    multi_threshold_df = compute_multi_threshold_report(y_test.values, y_pred_corrected)
 
     game_dates_test = test["game_date"].values
 
     daily_pk = compute_daily_precision_recall_at_k(
-        y_test.values, y_pred_calibrated, game_dates_test,
+        y_test.values, y_pred_corrected, game_dates_test,
     )
     logger.info("Daily precision/recall at K: %s", daily_pk)
 
-    bucket_df = compute_bucket_hit_rates(y_test.values, y_pred_calibrated)
+    bucket_df = compute_bucket_hit_rates(y_test.values, y_pred_corrected)
 
     base_rate = y_test.values.mean() if len(y_test) > 0 else 0.03
     market_probs = np.full(len(y_test), base_rate)
-    edge_dist_df = compute_edge_distribution(y_pred_calibrated, market_probs)
+    edge_dist_df = compute_edge_distribution(y_pred_corrected, market_probs)
 
-    backtest = backtest_betting_strategy(y_test.values, y_pred_calibrated)
+    backtest = backtest_betting_strategy(y_test.values, y_pred_corrected)
     logger.info("Backtest results: %s", backtest)
 
     betting_metrics = {**daily_pk, **backtest}
@@ -384,9 +412,9 @@ def main() -> None:
     save_evaluation_report(
         pa_metrics_raw, feature_names, importances, y_test.values, y_pred_proba,
         game_metrics=game_metrics,
-        calibrated_proba=y_pred_calibrated,
-        calibrated_metrics=pa_metrics_calibrated,
-        game_metrics_calibrated=game_metrics_calibrated,
+        calibrated_proba=y_pred_corrected,
+        calibrated_metrics=pa_metrics_corrected,
+        game_metrics_calibrated=game_metrics_corrected,
         betting_metrics=betting_metrics,
         bucket_df=bucket_df,
         game_dates=game_dates_test,

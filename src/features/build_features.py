@@ -8,11 +8,20 @@ from config.feature_config import (
     PROCESSED_DATA_DIR,
     RAW_DATA_DIR,
     ROLLING_WINDOWS,
+    STARTER_GAME_MATRIX_PATH,
 )
 from src.data.collect_weather import load_weather_data
 from src.features.environment_features import (
     add_environment_features,
     compute_park_hr_factors,
+    compute_park_k_factors,
+)
+from src.features.pitch_features import (
+    aggregate_batter_pitch_stats,
+    aggregate_pitcher_pitch_stats,
+    compute_batter_pitch_rolling,
+    compute_pitcher_pitch_rolling,
+    merge_pitch_features_onto_pas,
 )
 from src.features.opportunity_features import (
     add_opportunity_features,
@@ -36,6 +45,7 @@ from src.features.feature_engineering import (
     merge_rolling_stats_onto_pas,
 )
 from src.features.interaction_features import add_interaction_features
+from src.features.starter_game_features import build_starter_game_matrix
 
 logger = logging.getLogger(__name__)
 
@@ -99,11 +109,14 @@ def build_feature_matrix() -> pd.DataFrame:
     logger.info("Computing park HR factors")
     park_factors = compute_park_hr_factors(raw_data)
 
+    logger.info("Computing park K factors")
+    park_k_factors = compute_park_k_factors(raw_data)
+
     logger.info("Loading weather data")
     weather = load_weather_data()
 
     logger.info("Adding environment features")
-    feature_df = add_environment_features(feature_df, park_factors, weather)
+    feature_df = add_environment_features(feature_df, park_factors, weather, park_k_factors)
 
     logger.info("Deriving batting order and team run rates")
     batting_order = derive_batting_order(raw_data)
@@ -123,6 +136,17 @@ def build_feature_matrix() -> pd.DataFrame:
     logger.info("Merging skill features onto PA rows")
     feature_df = merge_skill_features_onto_pas(feature_df, batter_skill, pitcher_skill)
 
+    logger.info("Aggregating batter pitch stats")
+    batter_pitch = aggregate_batter_pitch_stats(raw_data)
+    batter_pitch = compute_batter_pitch_rolling(batter_pitch, windows=ROLLING_WINDOWS)
+
+    logger.info("Aggregating pitcher pitch stats")
+    pitcher_pitch = aggregate_pitcher_pitch_stats(raw_data)
+    pitcher_pitch = compute_pitcher_pitch_rolling(pitcher_pitch, windows=ROLLING_WINDOWS)
+
+    logger.info("Merging pitch features onto PA rows")
+    feature_df = merge_pitch_features_onto_pas(feature_df, batter_pitch, pitcher_pitch)
+
     logger.info("Adding interaction features")
     feature_df = add_interaction_features(feature_df)
 
@@ -133,21 +157,49 @@ def build_feature_matrix() -> pd.DataFrame:
     return feature_df
 
 
+def build_starter_matrix() -> pd.DataFrame:
+    logger.info("Starting starter-game feature matrix build")
+    raw_data = load_raw_data()
+    starter_matrix = build_starter_game_matrix(raw_data)
+
+    Path(PROCESSED_DATA_DIR).mkdir(parents=True, exist_ok=True)
+    starter_matrix.to_parquet(STARTER_GAME_MATRIX_PATH, index=False)
+    logger.info(f"Saved starter game matrix to {STARTER_GAME_MATRIX_PATH}")
+
+    target_mean = starter_matrix["n_k_against"].mean()
+    date_min = starter_matrix["game_date"].min().date()
+    date_max = starter_matrix["game_date"].max().date()
+
+    logger.info(
+        f"Summary: {len(starter_matrix):,} rows | "
+        f"Mean K: {target_mean:.2f} | "
+        f"Date range: {date_min} to {date_max} | "
+        f"Features: {starter_matrix.shape[1]}"
+    )
+    return starter_matrix
+
+
 def main() -> None:
+    import sys
+
+    if "--starter" in sys.argv:
+        build_starter_matrix()
+        return
+
     feature_matrix = build_feature_matrix()
 
     Path(PROCESSED_DATA_DIR).mkdir(parents=True, exist_ok=True)
     feature_matrix.to_parquet(FEATURE_MATRIX_PATH, index=False)
     logger.info(f"Saved feature matrix to {FEATURE_MATRIX_PATH}")
 
-    hr_rate = feature_matrix["is_hr"].mean() if "is_hr" in feature_matrix.columns else float("nan")
+    k_rate = feature_matrix["is_k"].mean() if "is_k" in feature_matrix.columns else float("nan")
 
     date_min = feature_matrix["game_date"].min().date()
     date_max = feature_matrix["game_date"].max().date()
 
     logger.info(
         f"Summary: {len(feature_matrix):,} rows | "
-        f"HR rate: {hr_rate:.4f} | "
+        f"K rate: {k_rate:.4f} | "
         f"Date range: {date_min} to {date_max} | "
         f"Features: {feature_matrix.shape[1]}"
     )

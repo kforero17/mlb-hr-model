@@ -82,7 +82,7 @@ class TestRunTuning:
             "pitcher": rng.integers(900, 910, n),
             "home_team": rng.choice(["NYY", "BOS", "LAD"], n),
             "away_team": rng.choice(["NYY", "BOS", "LAD"], n),
-            "is_hr": rng.choice([0, 0, 0, 0, 0, 0, 0, 0, 0, 1], n),
+            "is_k": rng.choice([0, 0, 0, 0, 1], n),
             "feature_a": rng.standard_normal(n),
             "feature_b": rng.standard_normal(n),
             "feature_c": rng.standard_normal(n),

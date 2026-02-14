@@ -39,9 +39,42 @@ TOP_N_FEATURES: int = 20
 
 CALIBRATION_METHOD: str = "platt"
 
+PREGAME_MODE: bool = True
+
 CATEGORICAL_FEATURES: list[str] = ["stand", "p_throws", "platoon", "inning", "roof_type"]
+PREGAME_CATEGORICAL_FEATURES: list[str] = ["stand", "p_throws", "platoon", "roof_type"]
 
 MODELS_DIR = Path("data/models")
 EVALUATION_DIR = MODELS_DIR / "evaluation"
-MODEL_PATH = MODELS_DIR / "lgbm_hr_model.joblib"
+MODEL_PATH = MODELS_DIR / "lgbm_k_model.joblib"
 TUNED_PARAMS_PATH = MODELS_DIR / "tuned_params.json"
+
+STARTER_K_LGBM_PARAMS: dict = {
+    "objective": "poisson",
+    "metric": "poisson",
+    "boosting_type": "gbdt",
+    "num_leaves": 31,
+    "max_depth": 6,
+    "learning_rate": 0.03,
+    "feature_fraction": 0.8,
+    "feature_fraction_bynode": 0.8,
+    "bagging_fraction": 0.8,
+    "bagging_freq": 5,
+    "min_child_samples": 50,
+    "lambda_l1": 0.1,
+    "lambda_l2": 1.0,
+    "verbose": -1,
+    "n_jobs": -1,
+    "seed": 42,
+}
+
+STARTER_K_MAX_BOOST_ROUNDS: int = 2000
+STARTER_K_EARLY_STOPPING_ROUNDS: int = 50
+
+STARTER_K_CATEGORICAL_FEATURES: list[str] = ["p_throws", "roof_type"]
+
+STARTER_K_MODELS_DIR = MODELS_DIR / "starter_k"
+STARTER_K_EVALUATION_DIR = STARTER_K_MODELS_DIR / "evaluation"
+STARTER_K_MODEL_PATH = STARTER_K_MODELS_DIR / "lgbm_starter_k_model.joblib"
+
+STARTER_K_OVER_UNDER_LINES: list[float] = [3.5, 4.5, 5.5, 6.5, 7.5, 8.5]

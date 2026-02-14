@@ -9,20 +9,20 @@ class TestAddInteractionFeatures:
 
     def _make_base_df(self) -> pd.DataFrame:
         return pd.DataFrame({
-            "batter_barrel_rate_50g": [0.10, 0.20],
-            "pitcher_fb_rate_50g": [0.40, 0.50],
-            "batter_hr_rate_vs_fastball_50g": [0.05, 0.10],
-            "pitcher_fastball_pct_50g": [0.60, 0.70],
-            "batter_hard_hit_rate_50g": [0.35, 0.40],
-            "pitcher_hr_allowed_rate_50g": [0.03, 0.04],
-            "batter_pull_rate_50g": [0.45, 0.50],
-            "park_hr_factor_handedness": [1.1, 0.9],
-            "elevation_ft": [5280.0, 0.0],
-            "wind_out_to_cf": [1.0, 0.0],
-            "air_density_index": [0.9, 1.0],
-            "batter_hr_streak_50g": [3.0, 0.0],
+            "batter_k_rate_50g": [0.25, 0.18],
+            "pitcher_k_rate_50g": [0.22, 0.30],
+            "batter_whiff_rate_50g": [0.28, 0.20],
+            "pitcher_swstr_rate_50g": [0.12, 0.15],
+            "batter_k_rate_vs_breaking_50g": [0.30, 0.22],
+            "pitcher_breaking_pct_50g": [0.35, 0.40],
+            "batter_chase_rate_50g": [0.32, 0.25],
+            "pitcher_chase_rate_induced_50g": [0.30, 0.28],
             "platoon_advantage": [1.0, 0.0],
-            "batter_hr_rate_50g": [0.04, 0.02],
+            "pitcher_avg_fastball_velo_50g": [95.0, 90.0],
+            "batter_zone_contact_rate_50g": [0.82, 0.88],
+            "pitcher_zone_rate_50g": [0.48, 0.52],
+            "park_k_factor": [1.05, 0.95],
+            "pitcher_offspeed_pct_50g": [0.15, 0.20],
         })
 
     def test_adds_all_nine_features(self):
@@ -33,39 +33,31 @@ class TestAddInteractionFeatures:
         ix_cols = [c for c in result.columns if c.startswith("ix_")]
         assert len(ix_cols) == 9
 
-    def test_barrel_x_elevation_normalizes(self):
+    def test_velo_interaction_normalizes(self):
         df = self._make_base_df()
 
         result = add_interaction_features(df)
 
-        expected = 0.10 * (5280.0 / 5280.0)
-        assert result["ix_barrel_x_elevation"].iloc[0] == pytest.approx(expected)
-
-    def test_barrel_x_air_density_inverts(self):
-        df = self._make_base_df()
-
-        result = add_interaction_features(df)
-
-        expected = 0.10 * (1.0 - 0.9)
-        assert result["ix_barrel_x_air_density"].iloc[0] == pytest.approx(expected)
+        expected = 0.25 * (95.0 - 90.0) / 10.0
+        assert result["ix_batter_k_x_velo"].iloc[0] == pytest.approx(expected)
 
     def test_nan_propagation(self):
         df = self._make_base_df()
-        df.loc[0, "batter_barrel_rate_50g"] = np.nan
+        df.loc[0, "batter_k_rate_50g"] = np.nan
 
         result = add_interaction_features(df)
 
-        assert pd.isna(result["ix_barrel_x_fb_rate"].iloc[0])
-        assert not pd.isna(result["ix_barrel_x_fb_rate"].iloc[1])
+        assert pd.isna(result["ix_batter_k_x_pitcher_k"].iloc[0])
+        assert not pd.isna(result["ix_batter_k_x_pitcher_k"].iloc[1])
 
     def test_skips_features_with_missing_columns(self):
         df = pd.DataFrame({
-            "batter_barrel_rate_50g": [0.10],
-            "pitcher_fb_rate_50g": [0.40],
+            "batter_k_rate_50g": [0.25],
+            "pitcher_k_rate_50g": [0.22],
         })
 
         result = add_interaction_features(df)
 
         ix_cols = [c for c in result.columns if c.startswith("ix_")]
         assert len(ix_cols) == 1
-        assert "ix_barrel_x_fb_rate" in ix_cols
+        assert "ix_batter_k_x_pitcher_k" in ix_cols

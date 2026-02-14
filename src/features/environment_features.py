@@ -9,74 +9,6 @@ from config.park_config import PARKS
 logger = logging.getLogger(__name__)
 
 
-def _compute_overall_park_factors(pa_df: pd.DataFrame, min_pa: int) -> pd.DataFrame:
-    pa_df = pa_df.copy()
-    pa_df["year"] = pa_df["game_date"].dt.year
-
-    park_stats = (
-        pa_df.groupby(["home_team", "year"])
-        .agg(n_pa=("is_hr", "size"), n_hr=("is_hr", "sum"))
-        .reset_index()
-    )
-    park_stats["park_hr_rate"] = park_stats["n_hr"] / park_stats["n_pa"]
-
-    league_stats = (
-        pa_df.groupby("year")
-        .agg(league_pa=("is_hr", "size"), league_hr=("is_hr", "sum"))
-        .reset_index()
-    )
-    league_stats["league_hr_rate"] = league_stats["league_hr"] / league_stats["league_pa"]
-
-    park_stats = park_stats.merge(league_stats[["year", "league_hr_rate"]], on="year", how="left")
-
-    park_stats["park_hr_factor"] = np.where(
-        (park_stats["league_hr_rate"] > 0) & (park_stats["n_pa"] >= min_pa),
-        park_stats["park_hr_rate"] / park_stats["league_hr_rate"],
-        1.0,
-    )
-
-    park_stats["year"] = park_stats["year"] + 1
-
-    return park_stats[["home_team", "year", "park_hr_factor"]]
-
-
-def _compute_handedness_park_factors(pa_df: pd.DataFrame, min_pa: int) -> pd.DataFrame:
-    pa_df = pa_df.copy()
-    pa_df["year"] = pa_df["game_date"].dt.year
-
-    park_hand_stats = (
-        pa_df.groupby(["home_team", "year", "stand"])
-        .agg(n_pa=("is_hr", "size"), n_hr=("is_hr", "sum"))
-        .reset_index()
-    )
-    park_hand_stats["park_hr_rate_hand"] = park_hand_stats["n_hr"] / park_hand_stats["n_pa"]
-
-    league_hand_stats = (
-        pa_df.groupby(["year", "stand"])
-        .agg(league_pa=("is_hr", "size"), league_hr=("is_hr", "sum"))
-        .reset_index()
-    )
-    league_hand_stats["league_hr_rate_hand"] = (
-        league_hand_stats["league_hr"] / league_hand_stats["league_pa"]
-    )
-
-    park_hand_stats = park_hand_stats.merge(
-        league_hand_stats[["year", "stand", "league_hr_rate_hand"]],
-        on=["year", "stand"],
-        how="left",
-    )
-
-    park_hand_stats["park_hr_factor_handedness"] = np.where(
-        (park_hand_stats["league_hr_rate_hand"] > 0) & (park_hand_stats["n_pa"] >= min_pa),
-        park_hand_stats["park_hr_rate_hand"] / park_hand_stats["league_hr_rate_hand"],
-        1.0,
-    )
-
-    park_hand_stats["year"] = park_hand_stats["year"] + 1
-
-    return park_hand_stats[["home_team", "year", "stand", "park_hr_factor_handedness"]]
-
-
 def compute_park_hr_factors(
     raw_df: pd.DataFrame,
     min_pa_per_park_year: int = 500,
@@ -90,8 +22,8 @@ def compute_park_hr_factors(
 
     logger.info("Computing park HR factors from %d plate appearances", len(pa_df))
 
-    overall = _compute_overall_park_factors(pa_df, min_pa_per_park_year)
-    handedness = _compute_handedness_park_factors(pa_df, min_pa_per_park_year)
+    overall = _compute_overall_park_event_factors(pa_df, "is_hr", "park_hr_factor", min_pa_per_park_year)
+    handedness = _compute_handedness_park_event_factors(pa_df, "is_hr", "park_hr_factor_handedness", min_pa_per_park_year)
 
     combined = handedness.merge(overall, on=["home_team", "year"], how="outer")
 
@@ -113,24 +45,28 @@ def _add_static_park_metadata(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def _merge_park_factors(
+def _merge_park_event_factors(
     df: pd.DataFrame,
     park_factors_df: pd.DataFrame,
+    overall_col: str,
+    handedness_col: str,
 ) -> pd.DataFrame:
-    overall_cols = ["home_team", "year", "park_hr_factor"]
+    overall_cols = ["home_team", "year", overall_col]
     overall_available = [c for c in overall_cols if c in park_factors_df.columns]
     overall = park_factors_df[overall_available].drop_duplicates()
 
     df = df.merge(overall, on=["home_team", "year"], how="left")
 
-    hand_cols = ["home_team", "year", "stand", "park_hr_factor_handedness"]
-    hand_available = [c for c in hand_cols if c in park_factors_df.columns]
-    hand = park_factors_df[hand_available].drop_duplicates()
+    if "stand" in df.columns:
+        hand_cols = ["home_team", "year", "stand", handedness_col]
+        hand_available = [c for c in hand_cols if c in park_factors_df.columns]
+        hand = park_factors_df[hand_available].drop_duplicates()
+        df = df.merge(hand, on=["home_team", "year", "stand"], how="left")
+    else:
+        df[handedness_col] = np.nan
 
-    df = df.merge(hand, on=["home_team", "year", "stand"], how="left")
-
-    df["park_hr_factor"] = df["park_hr_factor"].fillna(1.0)
-    df["park_hr_factor_handedness"] = df["park_hr_factor_handedness"].fillna(1.0)
+    df[overall_col] = df[overall_col].fillna(1.0)
+    df[handedness_col] = df[handedness_col].fillna(1.0)
 
     return df
 
@@ -183,10 +119,115 @@ def _compute_air_density_index(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def compute_park_k_factors(
+    raw_df: pd.DataFrame,
+    min_pa_per_park_year: int = 500,
+) -> pd.DataFrame:
+    raw_df = raw_df.copy()
+    raw_df["game_date"] = pd.to_datetime(raw_df["game_date"])
+
+    pa_mask = raw_df["events"].notna() & raw_df["events"].isin(PLATE_APPEARANCE_EVENTS)
+    pa_df = raw_df.loc[pa_mask].copy()
+    pa_df["is_k"] = pa_df["events"].str.startswith("strikeout").fillna(False).astype(int)
+
+    logger.info("Computing park K factors from %d plate appearances", len(pa_df))
+
+    overall = _compute_overall_park_event_factors(pa_df, "is_k", "park_k_factor", min_pa_per_park_year)
+    handedness = _compute_handedness_park_event_factors(pa_df, "is_k", "park_k_factor_handedness", min_pa_per_park_year)
+
+    combined = handedness.merge(overall, on=["home_team", "year"], how="outer")
+
+    logger.info(
+        "Park K factors computed: %d rows covering %d parks",
+        len(combined),
+        combined["home_team"].nunique(),
+    )
+    return combined
+
+
+def _compute_overall_park_event_factors(
+    pa_df: pd.DataFrame,
+    event_col: str,
+    factor_name: str,
+    min_pa: int,
+) -> pd.DataFrame:
+    pa_df = pa_df.copy()
+    pa_df["year"] = pa_df["game_date"].dt.year
+
+    park_stats = (
+        pa_df.groupby(["home_team", "year"])
+        .agg(n_pa=(event_col, "size"), n_events=(event_col, "sum"))
+        .reset_index()
+    )
+    park_stats["park_rate"] = park_stats["n_events"] / park_stats["n_pa"]
+
+    league_stats = (
+        pa_df.groupby("year")
+        .agg(league_pa=(event_col, "size"), league_events=(event_col, "sum"))
+        .reset_index()
+    )
+    league_stats["league_rate"] = league_stats["league_events"] / league_stats["league_pa"]
+
+    park_stats = park_stats.merge(league_stats[["year", "league_rate"]], on="year", how="left")
+
+    park_stats[factor_name] = np.where(
+        (park_stats["league_rate"] > 0) & (park_stats["n_pa"] >= min_pa),
+        park_stats["park_rate"] / park_stats["league_rate"],
+        1.0,
+    )
+
+    park_stats["year"] = park_stats["year"] + 1
+
+    return park_stats[["home_team", "year", factor_name]]
+
+
+def _compute_handedness_park_event_factors(
+    pa_df: pd.DataFrame,
+    event_col: str,
+    factor_name: str,
+    min_pa: int,
+) -> pd.DataFrame:
+    pa_df = pa_df.copy()
+    pa_df["year"] = pa_df["game_date"].dt.year
+
+    park_hand_stats = (
+        pa_df.groupby(["home_team", "year", "stand"])
+        .agg(n_pa=(event_col, "size"), n_events=(event_col, "sum"))
+        .reset_index()
+    )
+    park_hand_stats["park_rate_hand"] = park_hand_stats["n_events"] / park_hand_stats["n_pa"]
+
+    league_hand_stats = (
+        pa_df.groupby(["year", "stand"])
+        .agg(league_pa=(event_col, "size"), league_events=(event_col, "sum"))
+        .reset_index()
+    )
+    league_hand_stats["league_rate_hand"] = (
+        league_hand_stats["league_events"] / league_hand_stats["league_pa"]
+    )
+
+    park_hand_stats = park_hand_stats.merge(
+        league_hand_stats[["year", "stand", "league_rate_hand"]],
+        on=["year", "stand"],
+        how="left",
+    )
+
+    park_hand_stats[factor_name] = np.where(
+        (park_hand_stats["league_rate_hand"] > 0) & (park_hand_stats["n_pa"] >= min_pa),
+        park_hand_stats["park_rate_hand"] / park_hand_stats["league_rate_hand"],
+        1.0,
+    )
+
+    park_hand_stats["year"] = park_hand_stats["year"] + 1
+
+    return park_hand_stats[["home_team", "year", "stand", factor_name]]
+
+
 def add_environment_features(
     df: pd.DataFrame,
     park_factors_df: pd.DataFrame,
     weather_df: pd.DataFrame | None,
+    park_k_factors_df: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     df = df.copy()
     df["game_date"] = pd.to_datetime(df["game_date"])
@@ -195,7 +236,10 @@ def add_environment_features(
     df["year"] = df["game_date"].dt.year
 
     df = _add_static_park_metadata(df)
-    df = _merge_park_factors(df, park_factors_df)
+    df = _merge_park_event_factors(df, park_factors_df, "park_hr_factor", "park_hr_factor_handedness")
+
+    if park_k_factors_df is not None:
+        df = _merge_park_event_factors(df, park_k_factors_df, "park_k_factor", "park_k_factor_handedness")
 
     if weather_df is not None:
         df = _merge_weather(df, weather_df)
@@ -210,9 +254,12 @@ def add_environment_features(
     if not had_year:
         df.drop(columns=["year"], inplace=True)
 
-    logger.info(
-        "Environment features added: elevation_ft, roof_type, park_hr_factor, "
-        "park_hr_factor_handedness, temp_f, wind_speed_mph, wind_dir_deg, "
-        "humidity_pct, wind_out_to_cf, air_density_index"
-    )
+    env_cols = [
+        "elevation_ft", "roof_type", "park_hr_factor", "park_hr_factor_handedness",
+        "temp_f", "wind_speed_mph", "wind_dir_deg", "humidity_pct",
+        "wind_out_to_cf", "air_density_index",
+    ]
+    if park_k_factors_df is not None:
+        env_cols += ["park_k_factor", "park_k_factor_handedness"]
+    logger.info("Environment features added: %s", ", ".join(env_cols))
     return df

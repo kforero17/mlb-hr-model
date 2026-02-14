@@ -5,18 +5,19 @@ import pandas as pd
 logger = logging.getLogger(__name__)
 
 _INTERACTIONS: list[tuple[str, str, str]] = [
-    ("ix_barrel_x_fb_rate", "batter_barrel_rate_50g", "pitcher_fb_rate_50g"),
-    ("ix_hr_vs_fb_x_fb_pct", "batter_hr_rate_vs_fastball_50g", "pitcher_fastball_pct_50g"),
-    ("ix_hard_hit_x_hr_allowed", "batter_hard_hit_rate_50g", "pitcher_hr_allowed_rate_50g"),
-    ("ix_pull_x_park_hand", "batter_pull_rate_50g", "park_hr_factor_handedness"),
-    ("ix_barrel_x_elevation", "batter_barrel_rate_50g", "elevation_ft"),
-    ("ix_hard_hit_x_wind_out", "batter_hard_hit_rate_50g", "wind_out_to_cf"),
-    ("ix_barrel_x_air_density", "batter_barrel_rate_50g", "air_density_index"),
-    ("ix_hr_streak_x_barrel", "batter_hr_streak_50g", "batter_barrel_rate_50g"),
-    ("ix_platoon_x_hr_rate", "platoon_advantage", "batter_hr_rate_50g"),
+    ("ix_batter_k_x_pitcher_k", "batter_k_rate_50g", "pitcher_k_rate_50g"),
+    ("ix_whiff_x_swstr", "batter_whiff_rate_50g", "pitcher_swstr_rate_50g"),
+    ("ix_k_vs_breaking_x_brk_pct", "batter_k_rate_vs_breaking_50g", "pitcher_breaking_pct_50g"),
+    ("ix_chase_x_chase_induced", "batter_chase_rate_50g", "pitcher_chase_rate_induced_50g"),
+    ("ix_platoon_x_pitcher_k", "platoon_advantage", "pitcher_k_rate_50g"),
+    ("ix_batter_k_x_velo", "batter_k_rate_50g", "pitcher_avg_fastball_velo_50g"),
+    ("ix_zone_contact_x_zone_rate", "batter_zone_contact_rate_50g", "pitcher_zone_rate_50g"),
+    ("ix_batter_k_x_park_k", "batter_k_rate_50g", "park_k_factor"),
+    ("ix_chase_x_offspeed", "batter_chase_rate_50g", "pitcher_offspeed_pct_50g"),
 ]
 
-_ELEVATION_DIVISOR = 5280.0
+_VELO_CENTER = 90.0
+_VELO_SCALE = 10.0
 
 
 def add_interaction_features(df: pd.DataFrame) -> pd.DataFrame:
@@ -33,10 +34,8 @@ def add_interaction_features(df: pd.DataFrame) -> pd.DataFrame:
         a = df[col_a]
         b = df[col_b]
 
-        if name == "ix_barrel_x_elevation":
-            b = b / _ELEVATION_DIVISOR
-        elif name == "ix_barrel_x_air_density":
-            b = 1.0 - b
+        if name == "ix_batter_k_x_velo":
+            b = (b - _VELO_CENTER) / _VELO_SCALE
 
         df[name] = a * b
         added += 1

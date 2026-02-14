@@ -5,6 +5,7 @@ import pytest
 from src.features.environment_features import (
     add_environment_features,
     compute_park_hr_factors,
+    compute_park_k_factors,
 )
 
 
@@ -92,6 +93,61 @@ class TestComputeParkHrFactors:
         tst_2023 = result[(result["home_team"] == "TST") & (result["year"] == 2023)]
         left_factor = tst_2023[tst_2023["stand"] == "L"]["park_hr_factor_handedness"].iloc[0]
         right_factor = tst_2023[tst_2023["stand"] == "R"]["park_hr_factor_handedness"].iloc[0]
+        assert left_factor != pytest.approx(right_factor, abs=0.01)
+
+
+class TestComputeParkKFactors:
+
+    def _make_k_rows(self, home_team, year, stand, n_pa, n_k):
+        rows = []
+        events_pool = ["field_out", "single", "walk", "home_run"]
+        for i in range(n_pa):
+            event = "strikeout" if i < n_k else events_pool[i % len(events_pool)]
+            rows.append({
+                "events": event,
+                "game_date": f"{year}-06-15",
+                "home_team": home_team,
+                "stand": stand,
+            })
+        return rows
+
+    def test_high_k_park_above_one(self):
+        rows = []
+        rows += self._make_k_rows("HK", 2022, "R", 600, 180)
+        rows += self._make_k_rows("AVG", 2022, "R", 600, 120)
+        raw_df = pd.DataFrame(rows)
+
+        result = compute_park_k_factors(raw_df)
+
+        hk_factor = result[result["home_team"] == "HK"]["park_k_factor"].iloc[0]
+        assert hk_factor > 1.0
+
+    def test_low_k_park_below_one(self):
+        rows = []
+        rows += self._make_k_rows("LK", 2022, "R", 600, 80)
+        rows += self._make_k_rows("AVG", 2022, "R", 600, 160)
+        raw_df = pd.DataFrame(rows)
+
+        result = compute_park_k_factors(raw_df)
+
+        lk_factor = result[result["home_team"] == "LK"]["park_k_factor"].iloc[0]
+        assert lk_factor < 1.0
+
+    def test_handedness_split_computed(self):
+        rows = []
+        rows += self._make_k_rows("TST", 2022, "L", 600, 180)
+        rows += self._make_k_rows("TST", 2022, "R", 600, 100)
+        rows += self._make_k_rows("OTH", 2022, "L", 600, 120)
+        rows += self._make_k_rows("OTH", 2022, "R", 600, 120)
+        raw_df = pd.DataFrame(rows)
+
+        result = compute_park_k_factors(raw_df)
+
+        assert "park_k_factor_handedness" in result.columns
+
+        tst_2023 = result[(result["home_team"] == "TST") & (result["year"] == 2023)]
+        left_factor = tst_2023[tst_2023["stand"] == "L"]["park_k_factor_handedness"].iloc[0]
+        right_factor = tst_2023[tst_2023["stand"] == "R"]["park_k_factor_handedness"].iloc[0]
         assert left_factor != pytest.approx(right_factor, abs=0.01)
 
 

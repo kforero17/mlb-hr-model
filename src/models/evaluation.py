@@ -90,7 +90,7 @@ def compute_multi_threshold_report(
     thresholds: list[float] | None = None,
 ) -> pd.DataFrame:
     if thresholds is None:
-        thresholds = [0.02, 0.03, 0.04, 0.05, 0.06]
+        thresholds = [0.10, 0.15, 0.20, 0.25, 0.30, 0.35, 0.40]
 
     rows: list[dict] = []
     for t in thresholds:
@@ -248,17 +248,18 @@ def plot_feature_importance(
 def evaluate_game_level_composition(
     test_df: pd.DataFrame,
     pa_pred_proba: np.ndarray,
+    target_col: str = "is_k",
 ) -> dict:
-    df = test_df[["batter", "game_pk", "game_date", "is_hr"]].copy()
+    df = test_df[["batter", "game_pk", "game_date", target_col]].copy()
     df["pred_proba"] = pa_pred_proba
 
     game_df = df.groupby(["batter", "game_pk", "game_date"]).agg(
         game_pred_proba=("pred_proba", lambda x: 1 - np.prod(1 - x)),
-        actual_hr=("is_hr", "max"),
+        actual=pd.NamedAgg(column=target_col, aggfunc="max"),
     ).reset_index()
 
     metrics = evaluate_model(
-        y_true=game_df["actual_hr"].values,
+        y_true=game_df["actual"].values,
         y_pred_proba=game_df["game_pred_proba"].values,
     )
 
@@ -320,10 +321,10 @@ def _daily_precision_recall_for_k(
 
         top_indices = np.argsort(day_pred)[::-1][:k]
         hits = day_true[top_indices].sum()
-        total_hrs = day_true.sum()
+        total_positives = day_true.sum()
 
         precisions.append(hits / k)
-        recalls.append(hits / total_hrs if total_hrs > 0 else 0.0)
+        recalls.append(hits / total_positives if total_positives > 0 else 0.0)
 
     return float(np.mean(precisions)), float(np.mean(recalls))
 
@@ -358,9 +359,9 @@ def compute_bucket_hit_rates(
     bucket_edges: list[float] | None = None,
 ) -> pd.DataFrame:
     if bucket_edges is None:
-        bucket_edges = [0.0, 0.02, 0.04, 0.06, 0.08, 0.10, 0.15, 0.20, 1.0]
+        bucket_edges = [0.0, 0.05, 0.10, 0.15, 0.20, 0.25, 0.30, 0.35, 0.40, 0.50, 1.0]
 
-    overall_hr_rate = y_true.mean() if len(y_true) > 0 else 0.0
+    overall_rate = y_true.mean() if len(y_true) > 0 else 0.0
     labels = [
         f"{bucket_edges[i]:.2f}-{bucket_edges[i + 1]:.2f}"
         for i in range(len(bucket_edges) - 1)
@@ -373,15 +374,15 @@ def compute_bucket_hit_rates(
     for i, label in enumerate(labels):
         mask = bucket_indices == i
         n_pred = int(mask.sum())
-        n_hrs = int(y_true[mask].sum()) if n_pred > 0 else 0
-        hit_rate = n_hrs / n_pred if n_pred > 0 else 0.0
+        n_hits = int(y_true[mask].sum()) if n_pred > 0 else 0
+        hit_rate = n_hits / n_pred if n_pred > 0 else 0.0
         avg_predicted = float(y_pred_proba[mask].mean()) if n_pred > 0 else 0.0
-        lift = hit_rate / overall_hr_rate if overall_hr_rate > 0 else 0.0
+        lift = hit_rate / overall_rate if overall_rate > 0 else 0.0
 
         rows.append({
             "bucket": label,
             "n_predictions": n_pred,
-            "n_hrs": n_hrs,
+            "n_hits": n_hits,
             "hit_rate": round(hit_rate, 4),
             "avg_predicted": round(avg_predicted, 4),
             "lift": round(lift, 2),
@@ -396,8 +397,8 @@ def plot_bucket_hit_rates(
     bucket_df: pd.DataFrame,
     save_path: Path | None = None,
 ) -> None:
-    overall_hr_rate = (
-        bucket_df["n_hrs"].sum() / bucket_df["n_predictions"].sum()
+    overall_rate = (
+        bucket_df["n_hits"].sum() / bucket_df["n_predictions"].sum()
         if bucket_df["n_predictions"].sum() > 0
         else 0.0
     )
@@ -410,14 +411,14 @@ def plot_bucket_hit_rates(
         markersize=8, label="Avg predicted probability",
     )
     ax.axhline(
-        y=overall_hr_rate, color="gray", linestyle="--",
-        label=f"Base rate ({overall_hr_rate:.4f})",
+        y=overall_rate, color="gray", linestyle="--",
+        label=f"Base rate ({overall_rate:.4f})",
     )
 
     ax.set_xticks(list(x))
     ax.set_xticklabels(bucket_df["bucket"], rotation=45, ha="right")
     ax.set_xlabel("Predicted probability bucket")
-    ax.set_ylabel("HR rate")
+    ax.set_ylabel("Actual rate")
     ax.set_title("Actual Hit Rate vs Predicted Probability Bucket")
     ax.legend(loc="upper left")
     fig.tight_layout()
@@ -461,6 +462,12 @@ def backtest_betting_strategy(
     if market_probs is None:
         base_rate = y_true.mean() if len(y_true) > 0 else 0.03
         market_probs = np.full_like(y_pred_proba, base_rate)
+        logger.warning(
+            "Backtest using SYNTHETIC odds (constant base rate %.4f). "
+            "Results are illustrative only — not indicative of real-market ROI. "
+            "Supply actual sportsbook odds for meaningful backtest.",
+            base_rate,
+        )
 
     edges = y_pred_proba - market_probs
     bet_mask = edges > edge_threshold
@@ -584,7 +591,7 @@ def _format_betting_block(m: dict) -> list[str]:
         lines.append("")
 
     if "n_bets" in m:
-        lines.append("Backtest Results")
+        lines.append("Backtest Results (SYNTHETIC ODDS — illustrative only)")
         lines.append("-" * 40)
         lines.append(f"  Bets placed:   {m.get('n_bets', 0)}")
         lines.append(f"  Wins:          {m.get('n_wins', 0)}")
